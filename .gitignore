@@ -1,6 +1,19 @@
 __pycache__/
 *.pyc
 scratch/
+*.log
+.pytest_cache/
+
+# editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# virtual envs
+venv/
+.venv/
+env/
 
 # webapp platform runtime state (SQLite DB + uploaded files) -- never committed
 webapp/data/

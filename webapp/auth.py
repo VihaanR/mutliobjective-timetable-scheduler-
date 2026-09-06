@@ -35,6 +35,11 @@ from webapp.models_db import AppSecret, Faculty
 SESSION_COOKIE = "tt_session"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
+# Development fallback used by the README/login screen for a first-run sample teacher account.
+DEV_SAMPLE_FACULTY_CODE = "NM"
+DEV_SAMPLE_EMAIL = "nilesh.marathe@djsce.edu.in"
+DEV_SAMPLE_PASSWORD = "Timetable@123"
+
 Role = Literal["faculty", "student"]
 
 _SCRYPT_PARAMS = dict(n=2**14, r=8, p=1, dklen=32)
@@ -57,6 +62,10 @@ def verify_password(password: str, stored: str) -> bool:
         return False
     digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, **_SCRYPT_PARAMS)
     return hmac.compare_digest(digest, expected)
+
+
+def matches_dev_sample_teacher_credentials(email: str, password: str) -> bool:
+    return email == DEV_SAMPLE_EMAIL and password == DEV_SAMPLE_PASSWORD
 
 
 def get_secret(session: Session) -> str:

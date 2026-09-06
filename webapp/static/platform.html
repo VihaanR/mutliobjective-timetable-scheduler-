@@ -130,8 +130,13 @@
         <input type="number" id="timeLimit" value="30" min="2" max="600" step="5">
       </div>
       <button id="generateBtn">Generate</button>
+      <button type="button" id="generateAllYearsBtn" class="secondary">Generate All Years Timetable</button>
     </div>
     <p class="notes" id="genNote">cpsat / pipeline can take significantly longer than greedy.</p>
+    <p class="notes">"Generate All Years Timetable" ignores the Branch/Year/Semester picker above and
+      solves every loaded branch at once, sharing rooms/faculty across years &mdash; use it so a
+      teacher's "My Timetable" page can show their lectures across SY, TY and Final Year together,
+      not just the one class you last generated.</p>
     <div class="status-line" id="genStatus"></div>
   </section>
 

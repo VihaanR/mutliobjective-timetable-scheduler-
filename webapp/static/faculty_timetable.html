@@ -31,6 +31,8 @@
   <div class="panel-section">
     <h2>My teaching timetable</h2>
     <p class="status-line" id="status">Loading…</p>
+    <p class="notes" id="multiYearHint" style="display:none;">Showing lectures merged across every
+      year/division you teach, from the latest "Generate All Years Timetable" run.</p>
     <div id="gridArea"></div>
   </div>
   <div class="legend">
@@ -74,9 +76,16 @@ function buildGridTable(data) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
             const batch = e.batch ? ` &middot; ${e.batch}` : "";
-            const division = e.division_id ? `${e.division_id} &middot; ` : "";
+            // `class_label` ("SY Sem IV &middot; D1") is stamped per-entry by webapp/grid_meta.py
+            // whenever branch identity is known; a run predating that (or a division with no
+            // matching branch row) falls back to the bare division id, same as before this field
+            // existed.
+            const cls = e.class_label && e.class_label !== "—"
+              ? e.class_label
+              : (e.division_id || "");
+            const division = cls ? `${cls} &middot; ` : "";
             s.innerHTML =
-              `<div class="s-course">${e.course}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
+              `<div class="s-course">${e.course_code || e.course}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
               `<div class="s-meta">${division}${e.room_name ? "@" + e.room_name : ""}${batch}</div>`;
           }
           cell.appendChild(s);
@@ -109,9 +118,21 @@ async function loadTimetable() {
     return;
   }
   const data = await res.json();
-  const divisions = [...new Set(Object.values(data.cells).flat().map((e) => e.division_id).filter(Boolean))].sort();
-  const divisionsText = divisions.length ? `Divisions: ${divisions.join(", ")} — ` : "";
-  $("status").textContent = `${divisionsText}from run #${data.run_id}`;
+  // `classes` (e.g. ["SY Sem III · D1", "TY Sem V · D2"]) comes from the run's stamped branch
+  // labels (webapp/routers/faculty.py); falls back to bare division ids for a run predating that.
+  const classes = data.classes && data.classes.length
+    ? data.classes
+    : [...new Set(Object.values(data.cells).flat().map((e) => e.division_id).filter(Boolean))].sort();
+  const classesText = classes.length ? `Classes: ${classes.join(", ")} — ` : "";
+  $("status").textContent = `${classesText}from run #${data.run_id}`;
+  if (data.classes && data.classes.length > 1) {
+    $("multiYearHint").style.display = "";
+  } else if (data.classes && data.classes.length === 1) {
+    $("multiYearHint").style.display = "";
+    $("multiYearHint").textContent =
+      "This is from a single-class run — ask an admin to run \"Generate All Years Timetable\" " +
+      "on the Platform page to see your lectures across every year you teach.";
+  }
   gridArea.innerHTML = "";
   gridArea.appendChild(buildGridTable(data));
 }

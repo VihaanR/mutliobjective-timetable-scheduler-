@@ -27,7 +27,8 @@ $("branchRefreshBtn").addEventListener("click", () => loadBranches());
 $("deptSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("yearSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("semSelect").addEventListener("change", () => { renderResolvedBranch(); checkReadiness(); });
-$("generateBtn").addEventListener("click", generate);
+$("generateBtn").addEventListener("click", () => generate(false));
+$("generateAllYearsBtn").addEventListener("click", () => generate(true));
 $("compareBtn").addEventListener("click", runCompare);
 $("adjustBtn").addEventListener("click", adjust);
 $("restoreBtn").addEventListener("click", restoreOriginal);
@@ -217,10 +218,16 @@ function renderReadiness(data) {
 }
 
 // ---------------------------------------------------------------- 3. generate
-async function generate() {
-  const btn = $("generateBtn");
-  btn.disabled = true;
-  $("genStatus").textContent = "submitting…";
+// `allYears=true` ignores the Branch/Year/Semester picker and solves the whole institution
+// (branch_ids: null) in one run, sharing rooms/faculty across every loaded year — this is what
+// lets "My Timetable" show one teacher's lectures across SY/TY/Final Year, since that view just
+// reads the most recent "done" run and a single-branch run can never contain another year's
+// sessions.
+async function generate(allYears) {
+  const genBtn = $("generateBtn"), allBtn = $("generateAllYearsBtn");
+  genBtn.disabled = true;
+  allBtn.disabled = true;
+  $("genStatus").textContent = allYears ? "submitting (all years)…" : "submitting…";
   $("summary").style.display = "none";
   $("stagesWrap").style.display = "none";
   $("exportRow").style.display = "none";
@@ -234,8 +241,8 @@ async function generate() {
   const payload = {
     solver: $("solver").value,
     time_limit: parseFloat($("timeLimit").value) || 30,
-    label: "",
-    branch_ids: getSelectedBranchIds(),
+    label: allYears ? "All years" : "",
+    branch_ids: allYears ? null : getSelectedBranchIds(),
   };
 
   try {
@@ -249,12 +256,14 @@ async function generate() {
       const issues = Array.isArray(body.detail) ? body.detail : [String(body.detail)];
       renderReadiness({ ready: false, issues });
       $("genStatus").textContent = "not ready — see the readiness banner above.";
-      btn.disabled = false;
+      genBtn.disabled = false;
+      allBtn.disabled = false;
       return;
     }
     if (res.status === 409) {
       $("genStatus").textContent = "a run is already in progress — try again shortly.";
-      btn.disabled = false;
+      genBtn.disabled = false;
+      allBtn.disabled = false;
       return;
     }
     if (!res.ok) {
@@ -263,11 +272,12 @@ async function generate() {
     }
     const data = await res.json();
     currentRunId = data.run_id;
-    $("genStatus").textContent = `run #${currentRunId} queued…`;
+    $("genStatus").textContent = `run #${currentRunId} queued${allYears ? " (all years)" : ""}…`;
     pollRun(currentRunId);
   } catch (e) {
     $("genStatus").textContent = "error: " + (e.message || e);
-    btn.disabled = false;
+    genBtn.disabled = false;
+    allBtn.disabled = false;
   }
 }
 
@@ -284,6 +294,7 @@ function pollRun(runId) {
         return;
       }
       $("generateBtn").disabled = false;
+      $("generateAllYearsBtn").disabled = false;
       if (run.status === "done") {
         $("genStatus").textContent = `run #${runId} done.`;
         renderSummary(run);
@@ -309,6 +320,7 @@ function pollRun(runId) {
     .catch((e) => {
       $("genStatus").textContent = "error polling run: " + (e.message || e);
       $("generateBtn").disabled = false;
+      $("generateAllYearsBtn").disabled = false;
     });
 }
 
@@ -410,7 +422,10 @@ function renderDivisionTabs(container, grids, activeIdx, onSelect) {
   grids.divisions.forEach((div, i) => {
     const t = document.createElement("div");
     t.className = "tab" + (i === activeIdx ? " active" : "");
-    t.textContent = "Division " + div.id;
+    // `class_label` ("SY Sem IV · D1") is stamped on every division by webapp/grid_meta.py once
+    // branch identity is known; a run predating that (or with no branch data at all) falls back to
+    // the bare division id exactly as before.
+    t.textContent = div.class_label && div.class_label !== "—" ? div.class_label : "Division " + div.id;
     t.onclick = () => onSelect(i);
     container.appendChild(t);
   });
@@ -463,10 +478,14 @@ function buildGridTable(grids, activeIdx, movedSet) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
             const batch = e.batch ? ` · ${e.batch}` : "";
+            // `course_code` (unqualified, e.g. "OE") is what a human should read; `course` is the
+            // raw engine id and is branch-qualified ("CSE-DS-SY-SEM3::OE") whenever this run spans
+            // more than one branch. Falls back to `course` for a run predating that field.
+            const courseCode = e.course_code || e.course;
             s.innerHTML =
-              `<div class="s-course">${e.course}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
+              `<div class="s-course">${courseCode}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
               `<div class="s-meta">${e.faculty ? e.faculty : ""}${e.room ? " · @" + e.room : ""}${batch}</div>`;
-            s.title = `${e.course} — ${e.type}\n${e.faculty_name || ""}\n${e.room_name || ""}`;
+            s.title = `${courseCode} — ${e.type}\n${e.faculty_name || ""}\n${e.room_name || ""}`;
           }
           cell.appendChild(s);
         });

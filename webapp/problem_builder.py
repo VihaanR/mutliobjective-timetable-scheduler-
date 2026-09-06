@@ -20,6 +20,76 @@ from engine.models import ProblemInstance
 from webapp.models_db import Allocation, Branch, Course, Division, Faculty, Room, SlotTemplate
 
 
+# Separator for branch-qualified engine ids (see `qualify` below). Chosen because no seeded
+# division name, course code or branch code contains it, so `unqualify` can split unambiguously.
+QUALIFIER = "::"
+
+
+def qualify(branch_code: str, name: str) -> str:
+    """Build the engine-facing id for a division/course inside `branch_code`.
+
+    The engine keys divisions by `Division.id` and courses by `Course.code` in flat, global dicts
+    (`ProblemInstance.division_by_id()` / `course_by_code()`), but those names are only unique
+    WITHIN a branch -- every year at DJSCE reuses D1/D2/D3, and SY Sem III and SY Sem IV both offer
+    a course coded `OE`. Solving several branches together therefore needs branch-qualified ids, or
+    the two branches' D1s silently collapse into one division and one `OE` definition overwrites the
+    other's weekly session counts.
+    """
+    return f"{branch_code}{QUALIFIER}{name}"
+
+
+def unqualify(engine_id: str) -> str:
+    """Recover the human-facing name from a possibly-qualified engine id ('X::D1' -> 'D1').
+
+    Safe on unqualified ids ('D1' -> 'D1'), so the display layer can call it unconditionally
+    without first knowing whether the run it is rendering was branch-qualified.
+    """
+    return engine_id.rsplit(QUALIFIER, 1)[-1]
+
+
+def _branch_rows(session: Session, branch_ids: list[int] | None) -> list[Branch]:
+    stmt = select(Branch)
+    if branch_ids is not None:
+        stmt = stmt.where(Branch.id.in_(branch_ids))
+    return list(session.exec(stmt).all())
+
+
+def spans_multiple_branches(session: Session, branch_ids: list[int] | None) -> bool:
+    """Whether this selection covers more than one branch, and therefore needs qualified ids.
+
+    Derived from the DB rather than from `len(branch_ids)` so that `branch_ids=None` (the
+    whole-institution selection) is answered correctly, and so a single-branch solve keeps its
+    plain, unqualified ids exactly as before this feature existed.
+    """
+    return len(_branch_rows(session, branch_ids)) > 1
+
+
+def build_division_meta(session: Session, branch_ids: list[int] | None = None,
+                        qualify_ids: bool = False) -> dict[str, dict]:
+    """Map each emitted engine division id to the branch identity behind it.
+
+    Stored alongside a run (`TimetableRun.division_meta`) because a solved grid otherwise carries
+    only an opaque division id, leaving no way to label a session with its department/year/semester
+    -- which is exactly what a cross-year teaching timetable has to show.
+    """
+    meta: dict[str, dict] = {}
+    for branch in _branch_rows(session, branch_ids):
+        divisions = session.exec(select(Division).where(Division.branch_id == branch.id)).all()
+        for d in divisions:
+            engine_id = qualify(branch.code, d.name) if qualify_ids else d.name
+            meta[engine_id] = {
+                "branch_id": branch.id,
+                "branch_code": branch.code,
+                "department": branch.department,
+                "department_name": branch.department_name,
+                "year_label": branch.year_label,
+                "year_name": branch.year_name,
+                "semester": branch.semester or d.semester,
+                "division_name": d.name,
+            }
+    return meta
+
+
 def _faculty_by_course_value(alloc: Allocation, faculty_code_by_id: dict[int, str]):
     """Resolve one allocation's faculty payload for `Division.faculty_by_course`.
 
@@ -39,12 +109,17 @@ def _faculty_by_course_value(alloc: Allocation, faculty_code_by_id: dict[int, st
     return None
 
 
-def build_problem_dict(session: Session, branch_ids: list[int] | None = None) -> dict:
+def build_problem_dict(session: Session, branch_ids: list[int] | None = None,
+                       qualify_ids: bool = False) -> dict:
     """Assemble the `problem_from_dict`-shaped dict from the current DB state.
 
     `branch_ids=None` means "no filter" (used for the whole-institution solve); an explicit list
     filters `courses`/`divisions` to those branches while `faculty`/`rooms`/`time_slots` are always
     global (see module docstring).
+
+    `qualify_ids=True` prefixes every emitted division id and course code with its branch code (see
+    `qualify`), which is what makes a multi-branch solve possible at all. Left off for a
+    single-branch solve so its ids stay plain and its stored runs keep the pre-existing shape.
     """
     slot_rows = sorted(session.exec(select(SlotTemplate)).all(), key=lambda s: (s.day, s.period))
     time_slots = [
@@ -72,18 +147,29 @@ def build_problem_dict(session: Session, branch_ids: list[int] | None = None) ->
     ]
     faculty_code_by_id = {f.id: f.code for f in faculty_rows}
 
+    # Branch code per branch id, needed to qualify division/course ids. Read across ALL branches
+    # (not just the selected ones) for the same reason `course_code_by_id` below is global: an
+    # allocation's FK may point at a row outside the current filter, and resolving it to `None`
+    # would silently drop the course instead of surfacing it.
+    branch_code_by_id = {b.id: b.code for b in session.exec(select(Branch)).all()}
+
+    def engine_course_code(course: Course) -> str:
+        if not qualify_ids:
+            return course.code
+        return qualify(branch_code_by_id.get(course.branch_id, "?"), course.code)
+
     # Course/division lookups: course codes are resolved against ALL courses (an allocation's FK
     # is trustworthy regardless of which branch is being filtered into the emitted `courses` list),
     # but the emitted `courses` list itself is branch-filtered.
     all_course_rows = session.exec(select(Course)).all()
-    course_code_by_id = {c.id: c.code for c in all_course_rows}
+    course_code_by_id = {c.id: engine_course_code(c) for c in all_course_rows}
 
     course_stmt = select(Course)
     if branch_ids is not None:
         course_stmt = course_stmt.where(Course.branch_id.in_(branch_ids))
     courses = [
         {
-            "code": c.code,
+            "code": engine_course_code(c),
             "title": c.title,
             "credits": c.credits,
             "category": c.category,
@@ -118,8 +204,9 @@ def build_problem_dict(session: Session, branch_ids: list[int] | None = None) ->
             if value is not None:
                 faculty_by_course[code] = value
 
+        division_id = qualify(branch_code_by_id.get(d.branch_id, "?"), d.name) if qualify_ids else d.name
         divisions.append({
-            "id": d.name,
+            "id": division_id,
             "program": d.program,
             "semester": d.semester,
             "student_count": d.student_count,
@@ -151,7 +238,7 @@ def build_problem_dict(session: Session, branch_ids: list[int] | None = None) ->
 
 
 def readiness(
-    session: Session, branch_ids: list[int] | None = None
+    session: Session, branch_ids: list[int] | None = None, qualify_ids: bool = False
 ) -> tuple[ProblemInstance | None, list[str]]:
     """Build a `ProblemInstance` and validate it, without ever raising on a sparse DB.
 
@@ -176,40 +263,46 @@ def readiness(
     if issues:
         return None, issues
 
-    # Guard against whole-institution id collisions: `build_problem_dict` emits the bare
+    # Guard against id collisions: with `qualify_ids=False`, `build_problem_dict` emits the bare
     # `Division.name`/`Course.code` as the engine id (unique only *within* a branch — see the
-    # module docstring), so the default whole-institution solve (branch_ids=None) would silently
-    # merge two branches' divisions/courses in the engine's id-keyed lookups
-    # (`division_by_id()`/`course_by_code()`) if their names/codes collide. Detected here, against
-    # the same branch_ids-filtered rows that will actually be emitted, and BEFORE `problem_from_dict`
-    # so a collision surfaces as a readiness issue instead of corrupting the snapshot silently.
-    division_name_counts: dict[str, int] = {}
-    for d in division_rows:
-        division_name_counts[d.name] = division_name_counts.get(d.name, 0) + 1
-    for name in sorted(division_name_counts):
-        if division_name_counts[name] > 1:
-            issues.append(
-                f"division name '{name}' is used by more than one included branch — rename so "
-                "the whole-institution solve has unique division ids"
-            )
+    # module docstring), so a multi-branch solve would silently merge two branches' divisions and
+    # courses in the engine's id-keyed lookups (`division_by_id()`/`course_by_code()`) whenever
+    # their names/codes collide. Detected here, against the same branch_ids-filtered rows that will
+    # actually be emitted, and BEFORE `problem_from_dict` so a collision surfaces as a readiness
+    # issue instead of corrupting the snapshot silently.
+    #
+    # `qualify_ids=True` prefixes every id with its branch code, which makes such a collision
+    # impossible by construction — so the guard is skipped rather than reporting names that are no
+    # longer ambiguous. This is what lets the all-years solve run at all: DJSCE reuses D1/D2/D3 in
+    # every year, so an unqualified whole-institution solve is permanently blocked here.
+    if not qualify_ids:
+        division_name_counts: dict[str, int] = {}
+        for d in division_rows:
+            division_name_counts[d.name] = division_name_counts.get(d.name, 0) + 1
+        for name in sorted(division_name_counts):
+            if division_name_counts[name] > 1:
+                issues.append(
+                    f"division name '{name}' is used by more than one included branch — rename so "
+                    "the whole-institution solve has unique division ids"
+                )
 
-    course_stmt = select(Course)
-    if branch_ids is not None:
-        course_stmt = course_stmt.where(Course.branch_id.in_(branch_ids))
-    course_rows = session.exec(course_stmt).all()
-    course_code_counts: dict[str, int] = {}
-    for c in course_rows:
-        course_code_counts[c.code] = course_code_counts.get(c.code, 0) + 1
-    for code in sorted(course_code_counts):
-        if course_code_counts[code] > 1:
-            issues.append(
-                f"course code '{code}' is used by more than one included branch — rename so "
-                "the whole-institution solve has unique course ids"
-            )
+        course_stmt = select(Course)
+        if branch_ids is not None:
+            course_stmt = course_stmt.where(Course.branch_id.in_(branch_ids))
+        course_rows = session.exec(course_stmt).all()
+        course_code_counts: dict[str, int] = {}
+        for c in course_rows:
+            course_code_counts[c.code] = course_code_counts.get(c.code, 0) + 1
+        for code in sorted(course_code_counts):
+            if course_code_counts[code] > 1:
+                issues.append(
+                    f"course code '{code}' is used by more than one included branch — rename so "
+                    "the whole-institution solve has unique course ids"
+                )
 
-    if issues:
-        return None, issues
+        if issues:
+            return None, issues
 
-    data = build_problem_dict(session, branch_ids=branch_ids)
+    data = build_problem_dict(session, branch_ids=branch_ids, qualify_ids=qualify_ids)
     problem = problem_from_dict(data)
     return problem, problem.validate()

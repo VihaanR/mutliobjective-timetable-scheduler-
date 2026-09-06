@@ -7,6 +7,7 @@ Run:  python -m uvicorn webapp.server:app --port 8750
 """
 import sys
 import os
+import threading
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from contextlib import asynccontextmanager
@@ -92,7 +93,7 @@ async def lifespan(app: FastAPI):
     calendar.get_upload_dir()  # ensure webapp/uploads/ exists
     with Session(get_engine()) as session:
         sweep_stale_running(session)  # fail any "running" run orphaned by a previous restart
-    _run_sy_reference_solver()
+    threading.Thread(target=_run_sy_reference_solver, daemon=True).start()
     yield
 
 
@@ -109,7 +110,7 @@ for _router in (auth_router.router, branches.router, faculty.router, students.ro
 def get_divisions():
     return schedule_data["divisions"]
 
-@app.get("/api/timetable/teachers")
+    threading.Thread(target=_run_sy_reference_solver, daemon=True).start()
 def get_teachers():
     return schedule_data["teachers"]
 

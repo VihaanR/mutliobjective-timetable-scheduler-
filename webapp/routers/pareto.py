@@ -16,7 +16,7 @@ from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.jobs import run_pareto_job
 from webapp.models_db import ParetoRun
-from webapp.problem_builder import readiness
+from webapp.problem_builder import readiness, spans_multiple_branches
 
 router = APIRouter(prefix="/api", tags=["pareto"])
 
@@ -36,7 +36,8 @@ def start_pareto_sweep(
     session: Session = Depends(get_session),
     _=Depends(require_faculty),
 ):
-    problem, issues = readiness(session, body.branch_ids)
+    qualify_ids = spans_multiple_branches(session, body.branch_ids)
+    problem, issues = readiness(session, body.branch_ids, qualify_ids=qualify_ids)
     if problem is None or issues:
         raise HTTPException(status_code=400, detail=issues)
 

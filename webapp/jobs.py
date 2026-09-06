@@ -19,6 +19,7 @@ from engine.scoring import score
 from engine.solvers import SOLVERS
 from engine.view import solution_to_grids
 from webapp.db import get_engine
+from webapp.grid_meta import annotate_grids
 from webapp.models_db import ParetoRun, TimetableRun
 
 
@@ -70,7 +71,10 @@ def run_generation(run_id: int) -> None:
                 wall_clock = solution.wall_clock_seconds
 
             sc = score(solution, problem)
-            grids = solution_to_grids(solution, problem)
+            # label every division/session with its department-year-semester before storing, so
+            # any later reader (per-teacher view, exports) has the branch identity without needing
+            # to re-derive it from the DB — the branch rows may have changed by then.
+            grids = annotate_grids(solution_to_grids(solution, problem), run.division_meta or {})
 
             run.solution = solution_to_dict(solution)
             run.grids = grids

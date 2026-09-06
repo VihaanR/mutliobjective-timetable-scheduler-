@@ -26,9 +26,10 @@ from engine.solvers import SOLVERS
 from engine.view import solution_to_grids
 from webapp.auth import require_faculty
 from webapp.db import get_session
+from webapp.grid_meta import annotate_grids
 from webapp.jobs import has_active_run, run_generation
-from webapp.models_db import TimetableRun
-from webapp.problem_builder import readiness
+from webapp.models_db import Branch, TimetableRun
+from webapp.problem_builder import build_division_meta, readiness, spans_multiple_branches
 
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -68,9 +69,18 @@ def generate(
     if body.solver != "pipeline" and body.solver not in SOLVERS:
         raise HTTPException(status_code=400, detail=f"unknown solver {body.solver!r}")
 
-    problem, issues = readiness(session, body.branch_ids)
+    # A selection spanning several branches must use branch-qualified engine ids, or the years'
+    # identically-named divisions (every year has a D1) collapse into one. Decided from the DB, not
+    # from the request, so `branch_ids=null` (all years) is handled the same as an explicit list.
+    qualify_ids = spans_multiple_branches(session, body.branch_ids)
+
+    problem, issues = readiness(session, body.branch_ids, qualify_ids=qualify_ids)
     if problem is None or issues:
         raise HTTPException(status_code=400, detail=issues)
+
+    covered = body.branch_ids if body.branch_ids is not None else [
+        b.id for b in session.exec(select(Branch)).all()
+    ]
 
     run = TimetableRun(
         status="queued",
@@ -78,6 +88,8 @@ def generate(
         time_limit=body.time_limit,
         label=body.label,
         problem_snapshot=problem_to_dict(problem),
+        branch_ids=list(covered),
+        division_meta=build_division_meta(session, body.branch_ids, qualify_ids=qualify_ids),
     )
     session.add(run)
     session.commit()
@@ -87,7 +99,8 @@ def generate(
     return {"run_id": run.id}
 
 
-def _run_solver_compare(problem, solver_name: str, time_limit: float) -> dict:
+def _run_solver_compare(problem, solver_name: str, time_limit: float,
+                        division_meta: dict | None = None) -> dict:
     if solver_name == "pipeline":
         config = PipelineConfig(
             cpsat_time_limit_s=time_limit,
@@ -125,15 +138,17 @@ def _run_solver_compare(problem, solver_name: str, time_limit: float) -> dict:
         "wall_clock_s": round(wall_clock_s, 1),
         "stage_reports": stage_reports,
         "notes": notes,
-        "grids": solution_to_grids(solution, problem),
+        "grids": annotate_grids(solution_to_grids(solution, problem), division_meta or {}),
     }
 
 
 @router.post("/compare")
 def compare(body: CompareRequest, session: Session = Depends(get_session), _=Depends(require_faculty)):
-    problem, issues = readiness(session, body.branch_ids)
+    qualify_ids = spans_multiple_branches(session, body.branch_ids)
+    problem, issues = readiness(session, body.branch_ids, qualify_ids=qualify_ids)
     if problem is None or issues:
         raise HTTPException(status_code=400, detail=issues)
+    division_meta = build_division_meta(session, body.branch_ids, qualify_ids=qualify_ids)
 
     solvers = body.solvers or ["pipeline", "cpsat", "greedy"]
     unique_solvers: list[str] = []
@@ -148,7 +163,8 @@ def compare(body: CompareRequest, session: Session = Depends(get_session), _=Dep
     if invalid:
         raise HTTPException(status_code=400, detail=f"unknown solver(s): {', '.join(invalid)}")
 
-    results = [_run_solver_compare(problem, solver_name, body.time_limit) for solver_name in unique_solvers]
+    results = [_run_solver_compare(problem, solver_name, body.time_limit, division_meta)
+               for solver_name in unique_solvers]
     best_index = min(range(len(results)), key=lambda i: (results[i]["hard_violations"], results[i]["soft_cost"]))
     return {
         "label": body.label,
@@ -171,6 +187,7 @@ def list_runs(session: Session = Depends(get_session), _=Depends(require_faculty
             "hard": r.hard,
             "soft": r.soft,
             "created_at": r.created_at,
+            "branch_ids": r.branch_ids or [],
         }
         for r in runs
     ]
@@ -193,6 +210,7 @@ def get_run(run_id: int, session: Session = Depends(get_session), _=Depends(requ
         "stage_reports": run.stage_reports,
         "error": run.error,
         "created_at": run.created_at,
+        "branch_ids": run.branch_ids or [],
     }
 
 
@@ -282,7 +300,7 @@ def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(g
                     relaxed_days=frozenset({body.day} | set(body.extra_relaxed_days)),
                     time_limit_s=body.time_limit_s, solver=body.solver)
 
-    grids = solution_to_grids(result.solution, problem)
+    grids = annotate_grids(solution_to_grids(result.solution, problem), run.division_meta or {})
     moved = [
         {
             "session_id": m.session_id,
@@ -321,5 +339,6 @@ def get_readiness(
     session: Session = Depends(get_session),
     _=Depends(require_faculty),
 ):
-    problem, issues = readiness(session, branch_ids)
+    qualify_ids = spans_multiple_branches(session, branch_ids)
+    problem, issues = readiness(session, branch_ids, qualify_ids=qualify_ids)
     return {"ready": problem is not None and not issues, "issues": issues}

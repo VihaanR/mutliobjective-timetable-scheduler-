@@ -236,6 +236,16 @@ class TimetableRun(SQLModel, table=True):
     status: str = "queued"
     created_at: datetime = Field(default_factory=datetime.utcnow)
     problem_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    # Which branches this run actually covered. An EMPTY list means the whole institution (every
+    # branch) -- the same convention `problem_builder.build_problem_dict(branch_ids=None)` uses.
+    # Recorded because a run is otherwise indistinguishable from any other once stored, and the
+    # per-teacher view has to answer "what is the newest run for EACH branch?" (webapp/routers/
+    # faculty.py) rather than just "what is the newest run?".
+    branch_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    # engine division id -> the branch identity behind it ({branch_id, branch_code, department,
+    # year_label, year_name, semester, division_name}). The engine only knows an opaque division
+    # id string, so without this a stored grid cannot say which year/semester a session belongs to.
+    division_meta: dict = Field(default_factory=dict, sa_column=Column(JSON))
     solution: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     grids: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     stage_reports: Optional[list] = Field(default=None, sa_column=Column(JSON))

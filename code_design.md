@@ -204,3 +204,56 @@ step that fans out into `Branch`/`Division`/`Course`/`Faculty`/`Allocation` (unl
 module's confirm, which just flips one boolean). §4 above is what this *automates* once built —
 this session did it by hand instead (manually reading the photographed timetables), which is what
 "for now I'll send you the timetables and you OCR it yourself" asked for.
+
+## 8. Cross-year branch identity on the teaching timetable + "Generate All Years"
+
+Two gaps this closed: (1) a solved grid carried only an opaque `Division.id` ("D1") with no
+department/year/semester attached, and (2) every solve was scoped to exactly one branch, so a
+teacher who teaches SY, TY *and* Final Year could never see all three at once — `/api/faculty/me/
+timetable` reads the single latest "done" run, and a single-branch run can only ever contain that
+one branch's sessions.
+
+**Id collision, and why it blocked a whole-institution solve before now.** The engine keys
+divisions by `Division.id` and courses by `Course.code` in flat, global dicts — unique only
+*within* a branch. Every DJSCE year reuses D1/D2/D3, and SY Sem III's `OE` collides with SY Sem
+IV's `OE`. `readiness()` used to hard-block this (`"division name 'D1' is used by more than one
+included branch"`), which is exactly correct for an *unqualified* solve but meant "solve everything
+at once" was never actually reachable.
+
+**Fix: branch-qualified engine ids, used only when they're needed.**
+`webapp/problem_builder.qualify(branch_code, name)` → `"CSE-DS-SY-SEM3::D1"`. `spans_multiple_
+branches()` decides whether a given `branch_ids` selection needs qualification; a single-branch
+solve is untouched — same plain `"D1"`, same collision guard, same everything, so nothing about the
+existing single-branch flow (adjust/disruption, exports, compare) changed shape.
+`unqualify()` strips it back off for display (`"CSE-DS-SY-SEM3::D1"` → `"D1"`).
+
+**Labelling:** `webapp/problem_builder.build_division_meta()` maps every emitted division id to its
+branch identity (department/year/semester/division name), stored on `TimetableRun.division_meta` at
+generation time. `webapp/grid_meta.annotate_grids()` stamps that onto the solved grid post-hoc —
+every division AND every per-cell session entry gets `class_label` ("SY Sem IV · D1"),
+`year_label`, `semester`, `department`, `course_code` (the unqualified course, since `course` itself
+is qualified on a multi-branch run), etc. Kept as a post-processing pass specifically so the engine
+stays branch-unaware — `engine/` has no concept of "branch" and shouldn't need one.
+
+**`POST /api/runs` with `branch_ids: null`** now actually solves the whole institution (every
+seeded branch, shared rooms/faculty) instead of being permanently blocked by the collision guard.
+The platform page's "Generate All Years Timetable" button (`platform.html`/`.js`) is exactly this —
+bypasses the Branch/Year/Semester picker, submits `branch_ids: null`. `TimetableRun.branch_ids`
+records which branches a run actually covered (`[]` conventionally means "all of them" isn't
+recorded that way — the router resolves `null` to every branch id that existed *at generate time*
+and stores that list, so a run stays self-describing even if branches are added/removed later).
+
+**Verified end-to-end** (2026-08-21, greedy solver, 4 seeded branches — SY Sem III/IV, TY Sem V,
+BTech Sem VII): a `branch_ids: null` run produced 11 divisions across all four branches with
+correctly qualified ids and `class_label`s ("SY Sem IV · D1", "TY Sem V · D1", "BTech Sem VII ·
+D2/D3", …); faculty `NM` (Dr. Nilesh Marathe)'s `/api/faculty/me/timetable` merged sessions from
+three different years in one response (`classes: ["BTech Sem VII · D2", "BTech Sem VII · D3", "SY
+Sem IV · D1", "TY Sem V · D1"]`, `spans_multiple_branches: true`) — exactly the "one teacher's
+lectures across all years" view this was built for. A parallel single-branch run confirmed
+unqualified ids (`"D1"`, not `"CSE-DS-SY-SEM4::D1"`) are unchanged.
+
+An additive SQLite migration (`webapp/db._apply_additive_migrations`) adds `TimetableRun.
+branch_ids`/`division_meta` to a pre-existing `platform.db` on startup, since `create_all` never
+alters an existing table — this repo's DB has been through several schema-additive sessions already
+and there is no migration framework, so each addition follows this same manual `ALTER TABLE`
+pattern.

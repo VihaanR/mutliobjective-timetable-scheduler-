@@ -25,10 +25,21 @@ router = APIRouter(prefix="/api", tags=["faculty"])
 @router.get("/faculty/me/timetable")
 def my_timetable(session: Session = Depends(get_session), principal: dict = Depends(require_faculty)):
     """Read-only: the caller's own personal timetable - every session they teach, merged across
-    every division they're allocated to (unlike the student version, which is scoped to exactly one
-    division). Regroups the already-stored `run.grids` by `entry["faculty"] == Faculty.code` rather
-    than re-solving - `run.grids` is precomputed once at generation time (webapp/jobs.py) and each
-    entry already carries the engine faculty code plus (as of this feature) its `division_id`."""
+    every division AND every branch (year/semester) they're allocated to (unlike the student
+    version, which is scoped to exactly one division). Regroups the already-stored `run.grids` by
+    `entry["faculty"] == Faculty.code` rather than re-solving - `run.grids` is precomputed once at
+    generation time (webapp/jobs.py) and each entry already carries the engine faculty code, its
+    `division_id`, and (as of the multi-year feature) branch identity fields stamped by
+    `webapp.grid_meta.annotate_grids` - `class_label`, `year_label`, `semester`, etc.
+
+    A teacher who teaches e.g. SY and TY only sees both years here if a single run's `grids`
+    actually contains both — which is exactly what the "Generate All Years Timetable" button on
+    the platform page produces (`POST /api/runs` with `branch_ids: null`). A run scoped to one
+    branch can only ever show that one branch's sessions, however recent it is; this endpoint
+    always reads the single latest "done" run, so generating a fresh single-branch run after an
+    all-years one will narrow this view back down to that one branch until an all-years run is
+    generated again.
+    """
     faculty = get_or_404(session, Faculty, principal["id"])
 
     run = session.exec(
@@ -46,12 +57,19 @@ def my_timetable(session: Session = Depends(get_session), principal: dict = Depe
             if mine:
                 cells.setdefault(key, []).extend(mine)
 
+    classes = sorted({
+        e.get("class_label") for entries in cells.values() for e in entries
+        if e.get("class_label")
+    })
+
     return {
         "run_id": run.id,
         "faculty_name": faculty.name,
         "days": run.grids["days"],
         "periods": run.grids["periods"],
         "cells": cells,
+        "classes": classes,
+        "spans_multiple_branches": len({e.get("branch_id") for v in cells.values() for e in v}) > 1,
     }
 
 

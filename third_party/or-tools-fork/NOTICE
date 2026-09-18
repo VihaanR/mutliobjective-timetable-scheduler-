@@ -1,0 +1,27 @@
+This project distributes MODIFIED builds of Google OR-Tools.
+
+Upstream:  https://github.com/google/or-tools
+Commit:    98c165af62df62b3056c2ee0fca66b24e79097cb
+License:   Apache License 2.0 (unchanged; see upstream LICENSE)
+
+Apache-2.0 section 4(b) requires modified files to carry prominent notice of
+change. The complete set of modifications is third_party/or-tools-fork/timetabling.patch
+in this repository. Summary of what was changed:
+
+  ortools/sat/cp_model_utils.{h,cc}  ADDED  ExtractDomainTag() and
+                                            GroupVariablesByDomainTag(), which read
+                                            structure tags out of variable names.
+  ortools/sat/cp_model_lns.{h,cc}    ADDED  DivisionDayNeighborhoodGenerator, an LNS
+                                            neighbourhood that relaxes whole
+                                            (division, day) blocks.
+  ortools/sat/cp_model_solver.cc     ADDED  Registration of the "division_day_lns"
+                                            subsolver.
+  ortools/sat/cp_model.proto         ADDED  Enum value CHOOSE_MIN_UNFIXED_IN_GROUP = 5.
+  ortools/sat/cp_model_search.cc     CHANGED one existing line (a lambda capture) and
+                                            added the branching rule for the new enum.
+
+No upstream file is removed and no upstream behaviour changes unless a model opts in
+by using the new enum or by naming variables with the tags.
+
+OR-Tools is a trademark of Google LLC. This fork is not affiliated with or endorsed
+by Google.

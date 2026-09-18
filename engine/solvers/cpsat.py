@@ -16,6 +16,7 @@ another, reusing this exact model -- see `research/pareto_sweep.py`.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 
@@ -31,6 +32,85 @@ from engine.solvers.candidates import (
 )
 
 FACULTY_BALANCE_WEIGHT = 30  # penalty per hour of (max weekly load - min weekly load) spread
+
+# ---- timetabling fork of OR-Tools (third_party/or-tools-fork/) --------------------------------
+# Everything below degrades cleanly on a stock `pip install ortools`: the "@R="/"@G=" tags in
+# variable names are simply ignored, CHOOSE_MIN_UNFIXED_IN_GROUP does not exist (so the MRV
+# strategy is skipped), and "division_day_lns" is not a registered subsolver (so naming it in
+# ignore_subsolvers is a no-op). That is deliberate -- the *same* model is emitted either way, so
+# a stock-vs-fork benchmark compares solvers rather than two different models.
+_FORK_MRV_STRATEGY = getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP", None)
+# Both fork features ship in the same patch, so the presence of the new branching enum is also
+# our signal that "division_day_lns" exists as a subsolver. That second check matters: OR-Tools
+# *validates* subsolver names and fails the whole solve with MODEL_INVALID
+# ("subsolver 'division_day_lns' is not valid") if an unknown one is named on a stock build.
+HAS_TIMETABLE_FORK = _FORK_MRV_STRATEGY is not None
+HAS_FORK_MRV = HAS_TIMETABLE_FORK  # back-compat alias
+
+_FALSEY = {"0", "false", "no", "off", ""}
+
+
+def _tags_enabled() -> bool:
+    """Whether to emit "@R="/"@G=" structure tags in variable names.
+
+    Defaults to ON only on a forked build. Tags are pure overhead on stock OR-Tools -- nothing
+    reads them -- and that overhead is not free: an earlier, verbose tag format doubled the
+    average variable name (23 -> 46 chars, ~98 KB extra across 4250 variables) and pushed
+    tests/engine/test_breaks.py::test_cpsat_breaks_vary_across_days, which this module's own
+    docstring already flags as borderline, past its time budget. Names are copied repeatedly
+    through presolve, so their size is not incidental.
+
+    Set TIMETABLE_FORK_TAGS=1 to force tags on for a stock-vs-fork benchmark, so both arms solve
+    a byte-identical model.
+    """
+    raw = os.environ.get("TIMETABLE_FORK_TAGS")
+    if raw is None:
+        return HAS_TIMETABLE_FORK
+    return raw.strip().lower() not in _FALSEY
+
+
+def _mrv_mode() -> str:
+    """How to order branching decisions. Read from $TIMETABLE_MRV at call time so a benchmark
+    can sweep modes without editing code.
+
+      auto    (default) dynamic on a forked build, off on a stock one
+      dynamic CP-SAT re-ranks requirements by remaining candidates at every node (fork only)
+      static  the best a stock build can do: one fixed order decided before search starts
+      off     no decision strategy at all -- CP-SAT's own automatic search
+
+    "static" is the Tier-0 ablation baseline: it shows how much of any gain came from merely
+    ordering the variables versus from re-ranking them live, which is the fork's actual claim.
+    """
+    mode = os.environ.get("TIMETABLE_MRV", "auto").strip().lower()
+    if mode not in {"auto", "dynamic", "static", "off"}:
+        mode = "auto"
+    if mode == "auto":
+        mode = "dynamic" if HAS_FORK_MRV else "off"
+    if mode == "dynamic" and not HAS_FORK_MRV:
+        mode = "off"  # asked for a fork-only feature on a stock build
+    return mode
+
+
+def _add_mrv_decision_strategy(model, requirements, candidates, x, *, dynamic: bool) -> int:
+    """Branch on the requirement that has the fewest placements still open.
+
+    Requirements are emitted tightest-first. On a forked build the solver re-ranks them live;
+    on a stock build the order is frozen at model-build time, which is the whole limitation the
+    fork removes. Returns how many variables were placed under the strategy.
+    """
+    ordered = sorted((r for r in requirements if candidates.get(r.id)),
+                     key=lambda r: len(candidates[r.id]))
+    vars_in_order = [x[(req.id, start_id, room_id)]
+                     for req in ordered
+                     for (start_id, _occ, _day, room_id) in candidates[req.id]]
+    if not vars_in_order:
+        return 0
+    model.AddDecisionStrategy(
+        vars_in_order,
+        _FORK_MRV_STRATEGY if dynamic else cp_model.CHOOSE_FIRST,
+        cp_model.SELECT_MAX_VALUE,  # try "yes, place it here" before "no"
+    )
+    return len(vars_in_order)
 
 # The four objective categories a Pareto sweep can bound/optimize independently.
 OBJECTIVE_CATEGORIES = ("rooms", "labs", "students", "faculty")
@@ -72,15 +152,35 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     sync_groups = sync_group_members(requirements)
 
     x: dict[tuple[str, int, str], cp_model.IntVar] = {}
+    # Compact integer tags, not the full ids: the C++ side groups by the tag's *value*, so any
+    # unique token works, and short ones keep the names (and presolve's copying of them) cheap.
+    tags_on = _tags_enabled()
+    req_tag: dict[str, int] = {}
+    group_tag: dict[tuple[str, int], int] = {}
     for req in requirements:
-        for (start_id, _occ, _day, room_id) in candidates[req.id]:
-            x[(req.id, start_id, room_id)] = model.NewBoolVar(f"x_{req.id}_{start_id}_{room_id}")
+        for (start_id, _occ, day, room_id) in candidates[req.id]:
+            # The name optionally carries domain-structure tags our OR-Tools fork reads back out
+            # (third_party/or-tools-fork/): "@R=" groups all candidate placements of one
+            # requirement (consumed by CHOOSE_MIN_UNFIXED_IN_GROUP branching), "@G=" groups a
+            # whole division-day (consumed by the division_day_lns neighborhood). A tag value
+            # runs to the next "@". Stock OR-Tools ignores variable names entirely.
+            name = f"x_{req.id}_{start_id}_{room_id}"
+            if tags_on:
+                r = req_tag.setdefault(req.id, len(req_tag))
+                g = group_tag.setdefault((req.division_id, day), len(group_tag))
+                name = f"{name}@R={r}@G={g}"
+            x[(req.id, start_id, room_id)] = model.NewBoolVar(name)
 
     for req in requirements:
         cands = candidates[req.id]
         if not cands:
             continue
         model.AddExactlyOne(x[(req.id, s, r)] for (s, _, _, r) in cands)
+
+    mrv_mode = _mrv_mode()
+    if mrv_mode in ("dynamic", "static"):
+        _add_mrv_decision_strategy(model, requirements, candidates, x,
+                                   dynamic=(mrv_mode == "dynamic"))
 
     def _accumulate(bucket: dict, key, var):
         bucket.setdefault(key, []).append(var)
@@ -498,6 +598,18 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.num_search_workers = 8
+
+    # The forked build registers "division_day_lns" and runs it by default (SubsolverNameFilter
+    # keeps any name that is not explicitly filtered). Setting TIMETABLE_DIVISION_DAY_LNS=0 is
+    # therefore the *baseline* arm of the A/B: same binary, neighborhood switched off.
+    #
+    # Gated on HAS_TIMETABLE_FORK because naming an unknown subsolver is NOT harmless: on a stock
+    # build OR-Tools rejects the parameters outright with MODEL_INVALID, which this module used
+    # to report as "TIMEOUT" with zero assignments -- i.e. a config error wearing the costume of
+    # a hard scheduling problem. Verified, not theoretical.
+    if HAS_TIMETABLE_FORK and \
+            os.environ.get("TIMETABLE_DIVISION_DAY_LNS", "1").strip().lower() in _FALSEY:
+        solver.parameters.ignore_subsolvers.append("division_day_lns")
     if extra_solver_params:
         for key, value in extra_solver_params.items():
             setattr(solver.parameters, key, value)
@@ -508,6 +620,10 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
         cp_model.OPTIMAL: "OPTIMAL",
         cp_model.FEASIBLE: "FEASIBLE",
         cp_model.INFEASIBLE: "INFEASIBLE",
+        # Distinct from TIMEOUT on purpose: MODEL_INVALID means the model or the solver
+        # parameters were rejected outright, which is a bug to fix, not a budget to raise.
+        # Folding it into "TIMEOUT" hides configuration errors as slow solves.
+        cp_model.MODEL_INVALID: "MODEL_INVALID",
     }
     status_name = status_map.get(status, "TIMEOUT")
 

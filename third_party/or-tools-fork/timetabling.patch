@@ -1,0 +1,331 @@
+diff --git a/ortools/sat/cp_model.proto b/ortools/sat/cp_model.proto
+index a286def..dad0f23 100644
+--- a/ortools/sat/cp_model.proto
++++ b/ortools/sat/cp_model.proto
+@@ -542,6 +542,19 @@ message DecisionStrategyProto {
+     CHOOSE_HIGHEST_MAX = 2;
+     CHOOSE_MIN_DOMAIN_SIZE = 3;
+     CHOOSE_MAX_DOMAIN_SIZE = 4;
++
++    // Timetabling research fork. Branch on a variable belonging to the group
++    // with the fewest still-unfixed members, where groups are read from the
++    // "@R=" tags in variable names (see cp_model_utils.h).
++    //
++    // This is the classic minimum-remaining-values heuristic, which the five
++    // strategies above cannot express for a model built out of Boolean
++    // placement flags: each such flag has domain {0, 1}, so
++    // CHOOSE_MIN_DOMAIN_SIZE scores every one of them identically (2) and
++    // degenerates to CHOOSE_FIRST. What we actually want to compare is how
++    // many placements remain open for the *course*, which is a property of a
++    // group of variables and has no representation in the proto otherwise.
++    CHOOSE_MIN_UNFIXED_IN_GROUP = 5;
+   }
+   VariableSelectionStrategy variable_selection_strategy = 2;
+ 
+diff --git a/ortools/sat/cp_model_lns.cc b/ortools/sat/cp_model_lns.cc
+index bed16c6..b69d26c 100644
+--- a/ortools/sat/cp_model_lns.cc
++++ b/ortools/sat/cp_model_lns.cc
+@@ -20,6 +20,7 @@
+ #include <functional>
+ #include <limits>
+ #include <memory>
++#include <numeric>
+ #include <random>
+ #include <string>
+ #include <tuple>
+@@ -1379,6 +1380,50 @@ Neighborhood RelaxRandomVariablesGenerator::Generate(
+   return helper_.FixGivenVariables(initial_solution, to_fix);
+ }
+ 
++DivisionDayNeighborhoodGenerator::DivisionDayNeighborhoodGenerator(
++    NeighborhoodGeneratorHelper const* helper, absl::string_view name,
++    std::vector<std::vector<int>> groups)
++    : NeighborhoodGenerator(name, helper), groups_(std::move(groups)) {
++  const CpModelProto& model_proto = helper->ModelProto();
++  for (int var = 0; var < model_proto.variables_size(); ++var) {
++    if (ExtractDomainTag(model_proto.variables(var).name(), "@G=").empty()) {
++      always_relaxed_.push_back(var);
++    }
++  }
++}
++
++Neighborhood DivisionDayNeighborhoodGenerator::Generate(
++    const CpSolverResponse& initial_solution, SolveData& data,
++    absl::BitGenRef random) {
++  if (groups_.empty()) return helper_.NoNeighborhood();
++
++  // Honour the LNS difficulty contract: difficulty is in [0, 1] and is tuned
++  // automatically by the framework depending on how quickly we solve what we
++  // return. We map it onto "how many whole division-days to unfreeze", with a
++  // floor of one -- a fragment smaller than a single division-day cannot
++  // improve the within-day objective terms this generator exists to attack.
++  const int num_groups = static_cast<int>(groups_.size());
++  const int num_to_relax = std::max(
++      1, static_cast<int>(std::round(data.difficulty * num_groups)));
++  if (num_to_relax >= num_groups) return helper_.FullNeighborhood();
++
++  // Partial Fisher-Yates: we only need the first `num_to_relax` of a shuffle,
++  // so stop there instead of ordering all the groups.
++  std::vector<int> order(num_groups);
++  std::iota(order.begin(), order.end(), 0);
++  for (int i = 0; i < num_to_relax; ++i) {
++    std::swap(order[i], order[absl::Uniform(random, i, num_groups)]);
++  }
++
++  std::vector<int> relaxed_variables = always_relaxed_;
++  for (int i = 0; i < num_to_relax; ++i) {
++    const std::vector<int>& group = groups_[order[i]];
++    relaxed_variables.insert(relaxed_variables.end(), group.begin(),
++                             group.end());
++  }
++  return helper_.RelaxGivenVariables(initial_solution, relaxed_variables);
++}
++
+ Neighborhood RelaxRandomConstraintsGenerator::Generate(
+     const CpSolverResponse& initial_solution, SolveData& data,
+     absl::BitGenRef random) {
+diff --git a/ortools/sat/cp_model_lns.h b/ortools/sat/cp_model_lns.h
+index 911c8c1..956b423 100644
+--- a/ortools/sat/cp_model_lns.h
++++ b/ortools/sat/cp_model_lns.h
+@@ -557,6 +557,55 @@ class RelaxRandomVariablesGenerator : public NeighborhoodGenerator {
+                         SolveData& data, absl::BitGenRef random) final;
+ };
+ 
++// Relaxes every placement variable belonging to a small number of whole
++// "division-days" (one class's one day of the week), and fixes the rest.
++//
++// Motivation: every generic generator in this file picks its fragment either
++// at random (above) or by walking the variable/constraint graph (below).
++// Neither can know that a university timetable decomposes naturally into
++// division-days. That matters because nearly every soft cost the timetable
++// objective pays -- idle gaps, day span, break placement -- is computed
++// *within* a single division-day. Relaxing one whole division-day therefore
++// hands the sub-solver a fragment whose internal structure it can actually
++// improve, instead of a scattering of unrelated placements that leaves every
++// gap penalty pinned by the frozen variables around it.
++//
++// `groups` is built by GroupVariablesByDomainTag(model, "@G=") -- see
++// cp_model_utils.h for how the grouping survives presolve.
++class DivisionDayNeighborhoodGenerator : public NeighborhoodGenerator {
++ public:
++  DivisionDayNeighborhoodGenerator(NeighborhoodGeneratorHelper const* helper,
++                                   absl::string_view name,
++                                   std::vector<std::vector<int>> groups);
++
++  Neighborhood Generate(const CpSolverResponse& initial_solution,
++                        SolveData& data, absl::BitGenRef random) final;
++
++  // A model with no "@G=" tags (i.e. one that did not come from the timetable
++  // builder) yields no groups; no-op rather than burn an LNS worker on it.
++  bool ReadyToGenerate() const override {
++    return !groups_.empty() && NeighborhoodGenerator::ReadyToGenerate();
++  }
++
++ private:
++  std::vector<std::vector<int>> groups_;
++
++  // Variables carrying no "@G=" tag at all: the auxiliary machinery of the
++  // model (per-day occupancy indicators, gap/span literals, workload counters)
++  // rather than placement decisions. These are *always* relaxed alongside the
++  // chosen groups.
++  //
++  // This is not an optimization, it is required for correctness of the
++  // fragment: those variables are functionally determined by the placement
++  // variables through lin_max/linear constraints, so freezing them at their
++  // incumbent values while relaxing the placements underneath them would pin
++  // the very occupancy pattern this generator is trying to change, leaving a
++  // neighborhood that is feasible but essentially unimprovable. Relaxing them
++  // costs next to nothing in search: once the frozen division-days' placements
++  // are fixed, propagation immediately re-derives them.
++  std::vector<int> always_relaxed_;
++};
++
+ // Pick a random subset of constraints and relax all the variables of these
+ // constraints. Note that to satisfy the difficulty, we might not relax all the
+ // variable of the "last" constraint.
+diff --git a/ortools/sat/cp_model_search.cc b/ortools/sat/cp_model_search.cc
+index a448c0a..5ba25cb 100644
+--- a/ortools/sat/cp_model_search.cc
++++ b/ortools/sat/cp_model_search.cc
+@@ -219,13 +219,52 @@ std::function<BooleanOrIntegerLiteral()> ConstructUserSearchStrategy(
+   const auto& parameters = *model->GetOrCreate<SatParameters>();
+   auto* random = model->GetOrCreate<ModelRandomGenerator>();
+ 
++  // Timetabling research fork: variable grouping for
++  // CHOOSE_MIN_UNFIXED_IN_GROUP, recovered from the "@R=" tags in variable
++  // names (see cp_model_utils.h). Built once here, not per decision, and only
++  // when some strategy actually asks for it.
++  std::vector<std::vector<int>> groups;
++  std::vector<int> var_to_group;
++  for (const DecisionStrategyProto& strategy : strategies) {
++    if (strategy.variable_selection_strategy() !=
++        DecisionStrategyProto::CHOOSE_MIN_UNFIXED_IN_GROUP) {
++      continue;
++    }
++    groups = GroupVariablesByDomainTag(cp_model_proto, "@R=");
++    var_to_group.assign(cp_model_proto.variables_size(), -1);
++    for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
++      for (const int v : groups[g]) var_to_group[v] = g;
++    }
++    break;
++  }
++
+   // Note that we copy strategies to keep the return function validity
+   // independently of the life of the passed vector.
+-  return [&view, &parameters, random, strategies]() {
++  //
++  // `group_unfixed` is carried in the closure rather than declared per call:
++  // this runs at every decision node, and a fresh allocation there would cost
++  // more than the heuristic saves. assign() on an already-sized vector reuses
++  // the capacity. Each worker constructs its own strategy from its own Model*,
++  // so this mutable state is not shared between threads.
++  return [&view, &parameters, random, strategies, groups, var_to_group,
++          group_unfixed = std::vector<int>()]() mutable {
+     for (const DecisionStrategyProto& strategy : strategies) {
+       int candidate_ref = -1;
+       int64_t candidate_value = std::numeric_limits<int64_t>::max();
+ 
++      // How many variables of each group are still unfixed *at this node*.
++      // Computed once per decision so that the scan below stays linear
++      // instead of quadratic in the group size.
++      if (strategy.variable_selection_strategy() ==
++          DecisionStrategyProto::CHOOSE_MIN_UNFIXED_IN_GROUP) {
++        group_unfixed.assign(groups.size(), 0);
++        for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
++          for (const int v : groups[g]) {
++            if (!view.IsFixed(v)) ++group_unfixed[g];
++          }
++        }
++      }
++
+       // TODO(user): Improve the complexity if this becomes an issue which
+       // may be the case if we do a fixed_search.
+ 
+@@ -270,6 +309,18 @@ std::function<BooleanOrIntegerLiteral()> ConstructUserSearchStrategy(
+             // The size of the domain is not multiplied by the coeff.
+             value = -(ub - lb + 1);
+             break;
++          case DecisionStrategyProto::CHOOSE_MIN_UNFIXED_IN_GROUP: {
++            // Minimum remaining values, but over the variable's *group* rather
++            // than its own domain: branch on the course that has the fewest
++            // placements still open. Untagged variables sort last (but remain
++            // selectable) so a partially tagged model still makes progress.
++            const int group = var < static_cast<int>(var_to_group.size())
++                                  ? var_to_group[var]
++                                  : -1;
++            value = group < 0 ? std::numeric_limits<int64_t>::max() - 1
++                              : group_unfixed[group];
++            break;
++          }
+           default:
+             LOG(FATAL) << "Unknown VariableSelectionStrategy "
+                        << strategy.variable_selection_strategy();
+diff --git a/ortools/sat/cp_model_solver.cc b/ortools/sat/cp_model_solver.cc
+index 720ecfb..32926ef 100644
+--- a/ortools/sat/cp_model_solver.cc
++++ b/ortools/sat/cp_model_solver.cc
+@@ -1935,6 +1935,23 @@ void SolveCpModelParallel(SharedClasses* shared, Model* global_model) {
+               helper, name_filter.LastName()),
+           lns_params_base, lns_params_stalling, helper, shared));
+     }
++
++    // Timetabling-specific LNS. Mirrors how the scheduling/packing/routing
++    // generators below are gated on the model actually containing the
++    // structure they exploit: here the gate is whether the model carries
++    // "@G=" division-day tags, so this costs nothing on every other model.
++    {
++      std::vector<std::vector<int>> division_day_groups =
++          GroupVariablesByDomainTag(shared->model_proto, "@G=");
++      if (division_day_groups.size() > 1 &&
++          name_filter.Keep("division_day_lns")) {
++        reentrant_interleaved_subsolvers.push_back(std::make_unique<LnsSolver>(
++            std::make_unique<DivisionDayNeighborhoodGenerator>(
++                helper, name_filter.LastName(),
++                std::move(division_day_groups)),
++            lns_params_base, lns_params_stalling, helper, shared));
++      }
++    }
+     if (params.use_lb_relax_lns() &&
+         params.num_workers() >= params.lb_relax_num_workers_threshold() &&
+         name_filter.Keep("lb_relax_lns")) {
+diff --git a/ortools/sat/cp_model_utils.cc b/ortools/sat/cp_model_utils.cc
+index 8725d30..6da615a 100644
+--- a/ortools/sat/cp_model_utils.cc
++++ b/ortools/sat/cp_model_utils.cc
+@@ -1176,5 +1176,33 @@ bool IsAffineIntAbs(const ConstraintProto& ct) {
+   return left_coeff == -right_coeff;
+ }
+ 
++absl::string_view ExtractDomainTag(absl::string_view var_name,
++                                   absl::string_view tag) {
++  const absl::string_view::size_type start = var_name.find(tag);
++  if (start == absl::string_view::npos) return absl::string_view();
++  const absl::string_view::size_type value_start = start + tag.size();
++  const absl::string_view::size_type end = var_name.find('@', value_start);
++  if (end == absl::string_view::npos) return var_name.substr(value_start);
++  return var_name.substr(value_start, end - value_start);
++}
++
++std::vector<std::vector<int>> GroupVariablesByDomainTag(
++    const CpModelProto& cp_model, absl::string_view tag) {
++  std::vector<std::vector<int>> groups;
++
++  // Keys are views into the proto's own name strings, which outlive this call.
++  absl::flat_hash_map<absl::string_view, int> group_index;
++  for (int var = 0; var < cp_model.variables_size(); ++var) {
++    const absl::string_view key =
++        ExtractDomainTag(cp_model.variables(var).name(), tag);
++    if (key.empty()) continue;
++    const auto [it, inserted] =
++        group_index.insert({key, static_cast<int>(groups.size())});
++    if (inserted) groups.push_back({});
++    groups[it->second].push_back(var);
++  }
++  return groups;
++}
++
+ }  // namespace sat
+ }  // namespace operations_research
+diff --git a/ortools/sat/cp_model_utils.h b/ortools/sat/cp_model_utils.h
+index 87eba2e..55cd6d0 100644
+--- a/ortools/sat/cp_model_utils.h
++++ b/ortools/sat/cp_model_utils.h
+@@ -438,6 +438,36 @@ bool ConvertCpModelProtoToWCnf(const CpModelProto& cp_model, std::string* out);
+ // We assume delta >= 0 and we only use the low bit of delta.
+ int CombineSeed(int base_seed, int64_t delta);
+ 
++// --- Domain-structure tags (timetabling research fork) ----------------------
++//
++// Upstream CP-SAT has no way to represent application-level structure: nothing
++// in a CpModelProto says that two Boolean variables describe placements of the
++// *same* university course, or that a group of variables all belong to the
++// *same* division-day. That knowledge exists only in the model-building layer.
++//
++// We pass it down through the one channel that already survives presolve
++// intact -- the variable name (presolve_context.cc copies the name whenever it
++// creates a replacement variable). The timetable model emits names shaped like
++//
++//     x_<req>_<slot>_<room>@R=<requirement id>@G=<division>#<day>
++//
++// where each "@KEY=" tag runs until the next '@' or the end of the name.
++// Everything before the first '@' is free-form and ignored, so the existing
++// human-readable debug names are preserved unchanged.
++//
++// Returns an empty view when `tag` does not appear in `var_name`.
++absl::string_view ExtractDomainTag(absl::string_view var_name,
++                                   absl::string_view tag);
++
++// Buckets the variable indices of `cp_model` by the value of `tag` in their
++// name. Variables whose name lacks `tag` are skipped entirely, so a model that
++// did not come from the timetable builder simply yields no groups.
++//
++// Groups come back in first-seen order rather than hash order: LNS and search
++// must be reproducible run to run, and iteration order of a hash map is not.
++std::vector<std::vector<int>> GroupVariablesByDomainTag(
++    const CpModelProto& cp_model, absl::string_view tag);
++
+ }  // namespace sat
+ }  // namespace operations_research
+ 

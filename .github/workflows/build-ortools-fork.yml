@@ -1,0 +1,135 @@
+# Builds the timetabling fork of OR-Tools and publishes installable Python wheels.
+#
+# Why this exists: third_party/or-tools-fork/timetabling.patch is only a recipe. Running it
+# needs a compiled C++ extension, which is ~25MB and platform-specific. Rather than commit
+# binaries (Apache-2.0 redistribution obligations, repo bloat, wrong-OS wheels), CI builds
+# them and attaches them to a Release.
+name: build-ortools-fork
+
+on:
+  workflow_dispatch:          # build on demand from the Actions tab
+  push:
+    tags: ['fork-v*']         # tagging fork-v1 publishes a Release with the wheels
+    paths: ['third_party/or-tools-fork/timetabling.patch']
+
+env:
+  # Pinned upstream commit the patch was authored against. Do not float this: the patch
+  # touches cp_model_search.cc line-for-line and will not apply to a moving target.
+  ORTOOLS_COMMIT: 98c165af62df62b3056c2ee0fca66b24e79097cb
+
+jobs:
+  wheel:
+    name: wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # Windows is the riskier build (MSVC toolchain, longer link times). Don't let it
+    # block the Linux wheel from publishing.
+    continue-on-error: ${{ matrix.os == 'windows-2022' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    steps:
+      - name: Check out this project (for the patch)
+        uses: actions/checkout@v4
+        with:
+          path: project
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # BUILD_PYTHON=ON hard-requires SWIG at cmake/python.cmake:28. A local build failed
+      # here first; without this step CI would fail identically.
+      - name: Install SWIG
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y swig
+          else
+            choco install swig --no-progress -y
+          fi
+          swig -version
+
+      - name: Fetch OR-Tools at the pinned commit
+        shell: bash
+        run: |
+          git init -q or-tools && cd or-tools
+          git remote add origin https://github.com/google/or-tools.git
+          git fetch -q --depth 1 origin "$ORTOOLS_COMMIT"
+          git checkout -q FETCH_HEAD
+          echo "upstream HEAD: $(git rev-parse HEAD)"
+
+      - name: Apply the timetabling patch
+        shell: bash
+        working-directory: or-tools
+        run: |
+          git apply --check ../project/third_party/or-tools-fork/timetabling.patch
+          git apply          ../project/third_party/or-tools-fork/timetabling.patch
+          git diff --stat
+
+      - name: Configure
+        shell: bash
+        working-directory: or-tools
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_DEPS=ON -DBUILD_PYTHON=ON \
+            -DBUILD_SAMPLES=OFF -DBUILD_EXAMPLES=OFF \
+            -DBUILD_FLATZINC=OFF -DBUILD_TESTING=OFF \
+            -DUSE_SCIP=OFF -DUSE_HIGHS=OFF -DUSE_XPRESS=OFF \n            -DGENERATE_PYTHON_STUB=OFF
+
+      - name: Build
+        shell: bash
+        working-directory: or-tools
+        run: cmake --build build --config Release -j 4
+
+      - name: Collect wheel
+        shell: bash
+        run: |
+          mkdir -p dist
+          find or-tools/build -name '*.whl' -exec cp {} dist/ \;
+          ls -la dist
+          test -n "$(ls -A dist)" || { echo "no wheel produced"; exit 1; }
+
+      # Smoke test: install the wheel and assert the fork is actually present. A wheel that
+      # builds but lacks the new enum is a silent failure -- the project's HAS_TIMETABLE_FORK
+      # probe would just fall back to stock and nobody would notice.
+      - name: Verify the wheel is the fork, not stock
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import sys
+          from ortools.sat.python import cp_model
+          strategy = getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP", None)
+          print("CHOOSE_MIN_UNFIXED_IN_GROUP =", strategy)
+          if strategy is None:
+              sys.exit("FAIL: wheel does not expose the fork's decision strategy")
+          print("OK: fork wheel verified")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ortools-fork-${{ matrix.os }}
+          path: dist/*.whl
+
+  release:
+    needs: wheel
+    if: startsWith(github.ref, 'refs/tags/fork-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.whl
+          body: |
+            Modified OR-Tools built from `third_party/or-tools-fork/timetabling.patch`
+            against upstream google/or-tools @ `98c165af62df62b3056c2ee0fca66b24e79097cb`.
+
+            Install the wheel matching your OS, then confirm:
+
+                python -c "from ortools.sat.python import cp_model; print(cp_model.CHOOSE_MIN_UNFIXED_IN_GROUP)"

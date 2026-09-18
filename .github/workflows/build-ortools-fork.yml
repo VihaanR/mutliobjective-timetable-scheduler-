@@ -7,10 +7,12 @@
 name: build-ortools-fork
 
 on:
-  workflow_dispatch:          # build on demand from the Actions tab
+  # Note: workflow_dispatch is only offered on the repository's DEFAULT branch.
+  # Until this workflow reaches main, use the tag trigger below -- tags build
+  # from whatever branch they point at.
+  workflow_dispatch:
   push:
-    tags: ['fork-v*']         # tagging fork-v1 publishes a Release with the wheels
-    paths: ['third_party/or-tools-fork/timetabling.patch']
+    tags: ['fork-v*']         # tagging fork-v1 builds the wheels and publishes a Release
 
 env:
   # Pinned upstream commit the patch was authored against. Do not float this: the patch

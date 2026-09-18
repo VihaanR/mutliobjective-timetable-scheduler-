@@ -110,7 +110,7 @@ for _router in (auth_router.router, branches.router, faculty.router, students.ro
 def get_divisions():
     return schedule_data["divisions"]
 
-    threading.Thread(target=_run_sy_reference_solver, daemon=True).start()
+@app.get("/api/timetable/teachers")
 def get_teachers():
     return schedule_data["teachers"]
 

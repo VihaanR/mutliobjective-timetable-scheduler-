@@ -23,9 +23,10 @@ jobs:
   wheel:
     name: wheel (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Windows is the riskier build (MSVC toolchain, longer link times). Don't let it
-    # block the Linux wheel from publishing.
-    continue-on-error: ${{ matrix.os == 'windows-2022' }}
+    # Windows is the deliverable: everyone on this project runs Windows, so a failed
+    # Windows wheel is a failed build, not a degraded one. (It is still the riskier
+    # toolchain -- MSVC, longer link times -- which is why fail-fast stays off below:
+    # one platform breaking must not cancel the other's diagnostics.)
     strategy:
       fail-fast: false
       matrix:

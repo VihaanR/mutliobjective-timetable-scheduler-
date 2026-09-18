@@ -48,9 +48,23 @@ give the specific proofs.
 
 ### 1.1 The mechanism: tags in variable names
 
-We pass structure down through the one channel that already survives presolve intact — the
-variable name. Presolve copies a variable's name whenever it creates a replacement variable
-(`presolve_context.cc:1118-1120`), so names reach the solver core.
+We pass structure down through the variable name. This requires one parameter to be set, and
+getting it wrong is silent:
+
+> **`SatParameters.ignore_names` defaults to `true`.** CP-SAT's first action is to copy the user
+> model into its presolve context via `ModelCopy::ImportVariablesAndMaybeIgnoreNames()`, which
+> drops every variable name unless this parameter is `false`. The solver core then never sees a
+> single tag, both features find zero groups, and the fork behaves *exactly* like stock — with
+> no error, no warning, and a perfectly valid solution.
+
+Measured, not inferred: dumping both models for a tagged instance gave **96** `@G=` names in the
+user model and **0** in the presolved model. Flipping the parameter takes CP-SAT's subsolver list
+from 9 entries to 10, with `division_day_lns` among them.
+
+With `ignore_names = false` set, names then survive the rest of presolve: it copies a variable's
+name whenever it creates a replacement variable (`presolve_context.cc:1118-1120`), so the tags
+reach the solver core intact. `engine/solvers/cpsat.py` sets the parameter whenever tags are
+enabled, since keeping names costs memory in CP-SAT's internal copy and buys nothing otherwise.
 
 The model emits names shaped like:
 

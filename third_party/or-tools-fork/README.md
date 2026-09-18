@@ -40,9 +40,14 @@ x_D1_CS101_TH_0_12_R101@R=D1_CS101_TH_0@G=D1#3
                        └── requirement ─┘└division#day┘
 ```
 
-Each `@KEY=` value runs to the next `@`; text before the first `@` is free-form. Presolve copies
-variable names when it rewrites variables (`presolve_context.cc:1118-1120`), which is what makes
-this survive into the solver. **Stock OR-Tools ignores variable names entirely**, so the tagging
+Each `@KEY=` value runs to the next `@`; text before the first `@` is free-form.
+
+**This only works with `ignore_names = false`.** That parameter defaults to *true*, and CP-SAT
+then strips every variable name while copying the user model into presolve
+(`ModelCopy::ImportVariablesAndMaybeIgnoreNames`) — the tags never reach the solver, both
+features find zero groups, and the fork silently behaves like stock. `engine/solvers/cpsat.py`
+sets it whenever tags are on. With it set, presolve preserves names across variable rewrites
+(`presolve_context.cc:1118-1120`) and the tags survive into the solver core. **Stock OR-Tools ignores variable names entirely**, so the tagging
 is inert on an unmodified build and both arms of a benchmark solve an identical model.
 
 ## Verification that exists today

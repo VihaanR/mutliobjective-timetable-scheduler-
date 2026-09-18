@@ -599,6 +599,21 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.num_search_workers = 8
 
+    # CP-SAT discards variable names when it copies the user model into its presolve context
+    # (ModelCopy::ImportVariablesAndMaybeIgnoreNames), because SatParameters.ignore_names
+    # defaults to TRUE. Both fork features read their structure out of those names, so without
+    # this line the tags are stripped before the solver ever sees them: division_day_lns finds
+    # zero groups, never registers, and the whole fork silently behaves exactly like stock.
+    #
+    # Verified by dumping the models: the user model carried 96 "@G=" names and the presolved
+    # model carried 0, and flipping this parameter takes the subsolver list from 9 entries to 10
+    # with "division_day_lns" among them.
+    #
+    # Only set when tags are on -- keeping names costs memory in CP-SAT's internal copy, and a
+    # run with tags disabled has nothing to gain from it.
+    if _tags_enabled():
+        solver.parameters.ignore_names = False
+
     # The forked build registers "division_day_lns" and runs it by default (SubsolverNameFilter
     # keeps any name that is not explicitly filtered). Setting TIMETABLE_DIVISION_DAY_LNS=0 is
     # therefore the *baseline* arm of the A/B: same binary, neighborhood switched off.

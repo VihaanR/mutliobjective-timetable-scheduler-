@@ -111,6 +111,14 @@ jobs:
           print("OK: fork wheel verified")
           PY
 
+      # Importing the enum proves the wheel carries the patch; it does NOT prove the fork
+      # works. Two bugs got past an import-only check: the model validator rejected the new
+      # strategy outright, and ignore_names stripped the tags so the subsolver never
+      # registered. Both produced a wheel that imported perfectly. So: actually solve.
+      - name: Smoke test - solve a tagged model and assert the fork engages
+        shell: bash
+        run: python project/third_party/or-tools-fork/smoke_test.py
+
       - uses: actions/upload-artifact@v4
         with:
           name: ortools-fork-${{ matrix.os }}

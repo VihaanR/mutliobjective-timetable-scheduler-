@@ -18,3 +18,4 @@ env/
 # webapp platform runtime state (SQLite DB + uploaded files) -- never committed
 webapp/data/
 webapp/uploads/
+research/fork_benchmark_results.json

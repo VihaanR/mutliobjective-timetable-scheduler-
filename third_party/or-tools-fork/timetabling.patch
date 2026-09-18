@@ -329,3 +329,21 @@ index 87eba2e..55cd6d0 100644
  }  // namespace sat
  }  // namespace operations_research
  
+diff --git a/ortools/sat/python/cp_model.py b/ortools/sat/python/cp_model.py
+index b2e4c38..ac317bd 100644
+--- a/ortools/sat/python/cp_model.py
++++ b/ortools/sat/python/cp_model.py
+@@ -111,6 +111,13 @@ CHOOSE_MIN_DOMAIN_SIZE = (
+ CHOOSE_MAX_DOMAIN_SIZE = (
+     cmh.DecisionStrategyProto.VariableSelectionStrategy.CHOOSE_MAX_DOMAIN_SIZE
+ )
++# Timetabling research fork. Enum values are re-exported by hand in this module, so
++# adding one to cp_model.proto is not enough to make it reachable from Python -- without
++# this line cp_model.CHOOSE_MIN_UNFIXED_IN_GROUP does not exist and a correctly patched
++# build is indistinguishable from a stock one.
++CHOOSE_MIN_UNFIXED_IN_GROUP = (
++    cmh.DecisionStrategyProto.VariableSelectionStrategy.CHOOSE_MIN_UNFIXED_IN_GROUP
++)
+ 
+ # Domain reduction strategy
+ SELECT_MIN_VALUE = cmh.DecisionStrategyProto.DomainReductionStrategy.SELECT_MIN_VALUE

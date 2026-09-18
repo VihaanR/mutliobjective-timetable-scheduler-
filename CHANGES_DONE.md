@@ -7,7 +7,7 @@ achieved through the public API, and how the modified solver is driven from this
 `stable`). This must be pinned: every file touched is a solver internal, not public API, and these
 files move between releases.
 
-**Total change:** 7 files, **234 insertions, 1 modification, 0 deletions.**
+**Total change:** 8 files, **241 insertions, 1 modification, 0 deletions.**
 
 | File | + | − | Role |
 |---|---:|---:|---|
@@ -18,6 +18,7 @@ files move between releases.
 | `ortools/sat/cp_model_solver.cc` | 17 | 0 | Registers the new subsolver |
 | `ortools/sat/cp_model.proto` | 13 | 0 | New enum `CHOOSE_MIN_UNFIXED_IN_GROUP` |
 | `ortools/sat/cp_model_search.cc` | 52 | **1** | The new branching rule |
+| `ortools/sat/python/cp_model.py` | 7 | 0 | Re-exports the enum to Python |
 
 The single modified line is in `cp_model_search.cc` and is discussed in §3.3. Everything else is
 pure addition — no upstream code is deleted, and no upstream behaviour changes unless a model
@@ -175,9 +176,20 @@ requires a new enum value rather than a parameter setting.
 ```
 
 Appending value `5` is wire-compatible: existing serialised models never contain it, and older
-readers treat it as an unknown enum rather than misparsing. Adding the value to the proto is also
-what makes the feature reachable from Python — the generated bindings expose
-`cp_model.CHOOSE_MIN_UNFIXED_IN_GROUP` automatically, with no change to the pybind11 layer.
+readers treat it as an unknown enum rather than misparsing.
+
+**Adding the value to the proto is necessary but not sufficient to reach Python.**
+`ortools/sat/python/cp_model.py` re-exports each enum value *by hand*:
+
+```python
+CHOOSE_MAX_DOMAIN_SIZE = (
+    cmh.DecisionStrategyProto.VariableSelectionStrategy.CHOOSE_MAX_DOMAIN_SIZE
+)
+```
+
+so the patch must add the matching line (§3.7). Without it `cp_model.CHOOSE_MIN_UNFIXED_IN_GROUP`
+does not exist, and a correctly patched, correctly compiled build is indistinguishable from a
+stock one — the project's fork detection returns `None` and silently falls back to plain CP-SAT.
 
 ### 3.3 The one modified line, and why it was unavoidable
 
@@ -278,6 +290,19 @@ after the index was built.
 One upstream detail that had to be checked rather than assumed: the existing early-exit in the scan
 loop is gated on `CHOOSE_FIRST` only, so the new strategy correctly scans all variables before
 deciding.
+
+
+### 3.7 Exporting the enum to Python — `ortools/sat/python/cp_model.py`
+
+```python
+CHOOSE_MIN_UNFIXED_IN_GROUP = (
+    cmh.DecisionStrategyProto.VariableSelectionStrategy.CHOOSE_MIN_UNFIXED_IN_GROUP
+)
+```
+
+Seven lines including the comment, and the whole feature is unreachable from Python without them.
+This is the failure mode the CI verification step exists to catch: the wheel built cleanly, the
+C++ was correct, and the only symptom was that the fork appeared to be stock.
 
 ---
 
@@ -469,7 +494,7 @@ just tune the parameters?"*
 
 **Verified:**
 
-- The patch applies cleanly to upstream `98c165af` — 7 files, 234 insertions, 1 deletion.
+- The patch applies cleanly to upstream `98c165af` — 8 files, 241 insertions, 1 deletion.
 - The algorithms are correct. `third_party/or-tools-fork/algo_test.cc` lifts both out of the patch
   verbatim (only `absl::string_view` → `std::string_view`), compiles with plain
   `g++ -std=c++17 -Wall -Wextra -O2`, and runs against 4,558 real variable names from this project's

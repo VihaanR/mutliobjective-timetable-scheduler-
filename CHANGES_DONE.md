@@ -7,7 +7,7 @@ achieved through the public API, and how the modified solver is driven from this
 `stable`). This must be pinned: every file touched is a solver internal, not public API, and these
 files move between releases.
 
-**Total change:** 8 files, **241 insertions, 1 modification, 0 deletions.**
+**Total change:** 9 files, **245 insertions, 2 modifications, 0 deletions.**
 
 | File | + | − | Role |
 |---|---:|---:|---|
@@ -19,8 +19,10 @@ files move between releases.
 | `ortools/sat/cp_model.proto` | 13 | 0 | New enum `CHOOSE_MIN_UNFIXED_IN_GROUP` |
 | `ortools/sat/cp_model_search.cc` | 52 | **1** | The new branching rule |
 | `ortools/sat/python/cp_model.py` | 7 | 0 | Re-exports the enum to Python |
+| `ortools/sat/cp_model_checker.cc` | 4 | **1** | Whitelists the enum in model validation |
 
-The single modified line is in `cp_model_search.cc` and is discussed in §3.3. Everything else is
+The two modified lines are a lambda capture in `cp_model_search.cc` (§3.3) and a condition
+in `cp_model_checker.cc` (§3.8). Everything else is
 pure addition — no upstream code is deleted, and no upstream behaviour changes unless a model
 opts in.
 
@@ -304,6 +306,37 @@ Seven lines including the comment, and the whole feature is unreachable from Pyt
 This is the failure mode the CI verification step exists to catch: the wheel built cleanly, the
 C++ was correct, and the only symptom was that the fork appeared to be stock.
 
+
+### 3.8 Passing model validation — `ortools/sat/cp_model_checker.cc`
+
+`ValidateSearchStrategies()` whitelists strategies **by value**, so an unrecognised one is
+rejected before the solver ever starts:
+
+```cpp
+    if (vss != DecisionStrategyProto::CHOOSE_FIRST &&
+        ...
+        vss != DecisionStrategyProto::CHOOSE_MAX_DOMAIN_SIZE &&
+        vss != DecisionStrategyProto::CHOOSE_MIN_UNFIXED_IN_GROUP) {
+      return absl::StrCat(
+          "Unknown or unsupported variable_selection_strategy: ", vss);
+```
+
+Without this clause a fully patched, correctly compiled wheel returns `MODEL_INVALID` with
+`Unknown or unsupported variable_selection_strategy: 5` the moment a model uses the strategy.
+
+**Three files must agree for one enum value to work**: the proto defines it, the checker admits
+it, and `cp_model.py` exports it. Missing any one produces a different, quiet failure —
+`AttributeError`, `MODEL_INVALID`, or a silent fall back to stock. An exhaustive grep for the
+adjacent enum value is the cheap way to find every site:
+
+```bash
+grep -rn "CHOOSE_MAX_DOMAIN_SIZE" --include=*.cc --include=*.h --include=*.py ortools/
+```
+
+That returns exactly three non-test sites: the checker, the search strategy switch, and the
+FlatZinc translator — the last of which only *emits* strategies and is excluded from this build
+(`BUILD_FLATZINC=OFF`).
+
 ---
 
 ## 4. Feature 2 — the `division_day_lns` neighbourhood
@@ -494,7 +527,7 @@ just tune the parameters?"*
 
 **Verified:**
 
-- The patch applies cleanly to upstream `98c165af` — 8 files, 241 insertions, 1 deletion.
+- The patch applies cleanly to upstream `98c165af` — 9 files, 245 insertions, 2 deletions.
 - The algorithms are correct. `third_party/or-tools-fork/algo_test.cc` lifts both out of the patch
   verbatim (only `absl::string_view` → `std::string_view`), compiles with plain
   `g++ -std=c++17 -Wall -Wextra -O2`, and runs against 4,558 real variable names from this project's
@@ -564,8 +597,8 @@ sentence is "on the DJSCE CSE-DS reference instance", not "for university timeta
 
 Independent of any timing result, the following are established and defensible:
 
-- Two specialisations were implemented at solver source level, in 8 files, adding 241 lines while
-  modifying exactly one existing line and deleting none.
+- Two specialisations were implemented at solver source level, in 9 files, adding 245 lines while
+  modifying two existing lines and deleting none.
 - Neither is reachable through the public API, with the reason stated precisely: `NewBoolVar`
   gives every placement variable domain size 2, so `CHOOSE_MIN_DOMAIN_SIZE` cannot distinguish
   them, and no upstream neighbourhood generator can express a division-day fragment.

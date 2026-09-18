@@ -22,6 +22,22 @@ index a286def..dad0f23 100644
    }
    VariableSelectionStrategy variable_selection_strategy = 2;
  
+diff --git a/ortools/sat/cp_model_checker.cc b/ortools/sat/cp_model_checker.cc
+index 74be2c2..fcec206 100644
+--- a/ortools/sat/cp_model_checker.cc
++++ b/ortools/sat/cp_model_checker.cc
+@@ -960,7 +960,10 @@ std::string ValidateSearchStrategies(const CpModelProto& model) {
+         vss != DecisionStrategyProto::CHOOSE_LOWEST_MIN &&
+         vss != DecisionStrategyProto::CHOOSE_HIGHEST_MAX &&
+         vss != DecisionStrategyProto::CHOOSE_MIN_DOMAIN_SIZE &&
+-        vss != DecisionStrategyProto::CHOOSE_MAX_DOMAIN_SIZE) {
++        vss != DecisionStrategyProto::CHOOSE_MAX_DOMAIN_SIZE &&
++        // Timetabling research fork: the validator whitelists strategies by value,
++        // so a new enum value in cp_model.proto is rejected here until it is listed.
++        vss != DecisionStrategyProto::CHOOSE_MIN_UNFIXED_IN_GROUP) {
+       return absl::StrCat(
+           "Unknown or unsupported variable_selection_strategy: ", vss);
+     }
 diff --git a/ortools/sat/cp_model_lns.cc b/ortools/sat/cp_model_lns.cc
 index bed16c6..b69d26c 100644
 --- a/ortools/sat/cp_model_lns.cc

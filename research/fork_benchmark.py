@@ -5,20 +5,25 @@ from this system is not evidence: CP-SAT uses num_search_workers=8 and its paral
 is non-deterministic by default. Measured on this project, an *unmodified* model gave
 PASS/PASS/PASS/FAIL/FAIL over five runs of one borderline test.
 
-Usage
------
-    # confirm which build you are on first -- this exits non-zero on stock
-    python third_party/or-tools-fork/verify_fork.py
+Arms A and B live in DIFFERENT WHEELS, so this runs twice -- once per virtualenv -- and the
+two result files are then compared. A wheel cannot be swapped inside a running interpreter.
 
-    # the full sweep
-    python -m research.fork_benchmark --seeds 5 --time-limit 60
+    # baseline venv: upstream @ 98c165af with the patch NOT applied
+    .venv-base/Scripts/python -m research.fork_benchmark --arms A --out research/base.json
 
-    # one arm, e.g. while iterating
-    python -m research.fork_benchmark --arms A E --seeds 3
+    # fork venv: the same commit, patched
+    .venv-fork/Scripts/python -m research.fork_benchmark --arms B C D E --out research/fork.json
 
-Each trial runs in its own subprocess. That is deliberate: HAS_TIMETABLE_FORK is resolved at
-import time, so switching arms in-process would not re-evaluate it, and a crashed or
-OOM-killed trial must not take the whole sweep with it.
+    # then
+    python -m research.fork_benchmark --compare research/base.json research/fork.json
+
+The baseline MUST be the unpatched build of the same upstream commit, NOT the pip wheel: pip
+ships 9.9.x while this tree is 9.15.x, so benchmarking against it would measure six minor
+releases of upstream improvement and credit them to the fork. CI builds both variants
+(`ortools-stock-*` and `ortools-fork-*` artifacts) for exactly this reason.
+
+Each trial runs in its own subprocess so a crashed or OOM-killed trial cannot take the sweep
+with it, and so HAS_TIMETABLE_FORK is re-resolved per trial.
 """
 from __future__ import annotations
 
@@ -46,14 +51,15 @@ class Arm:
 
 
 ARMS: dict[str, Arm] = {
-    "A": Arm("A", "stock baseline",
+    # Run A in the BASELINE venv (unpatched, same commit); the rest in the fork venv.
+    "A": Arm("A", "unpatched baseline, same upstream commit",
              {"TIMETABLE_MRV": "off", "TIMETABLE_FORK_TAGS": "0"}, False),
     "B": Arm("B", "fork, both features off (must match A)",
              {"TIMETABLE_MRV": "off", "TIMETABLE_FORK_TAGS": "0",
               "TIMETABLE_DIVISION_DAY_LNS": "0"}, True),
     "C": Arm("C", "static ordering only (Tier-0 ablation)",
              {"TIMETABLE_MRV": "static", "TIMETABLE_FORK_TAGS": "1",
-              "TIMETABLE_DIVISION_DAY_LNS": "0"}, False),
+              "TIMETABLE_DIVISION_DAY_LNS": "0"}, True),
     "D": Arm("D", "division_day_lns only",
              {"TIMETABLE_MRV": "off", "TIMETABLE_FORK_TAGS": "1",
               "TIMETABLE_DIVISION_DAY_LNS": "1"}, True),
@@ -105,7 +111,12 @@ def main() -> int:
                     help=f"subset of {' '.join(ARMS)} (default: all)")
     ap.add_argument("--out", default="research/fork_benchmark_results.json")
     ap.add_argument("--trial", type=int, help=argparse.SUPPRESS)  # internal worker mode
+    ap.add_argument("--compare", nargs=2, metavar=("BASE_JSON", "FORK_JSON"),
+                    help="compare two result files instead of running anything")
     args = ap.parse_args()
+
+    if args.compare:
+        return compare(*args.compare)
 
     if args.trial is not None:
         print(json.dumps(_run_trial(args.trial, args.time_limit)))
@@ -161,11 +172,40 @@ def main() -> int:
                   fh, indent=2)
     print(f"\nwrote {args.out}")
 
-    if "A" in results and "B" in results and results["A"] and results["B"]:
-        a = statistics.median(r["penalty"] for r in results["A"] if r["penalty"] is not None)
-        b = statistics.median(r["penalty"] for r in results["B"] if r["penalty"] is not None)
-        note = "match" if a == b else f"DIFFER (A={a}, B={b}) -- investigate before trusting C/D/E"
-        print(f"\nArm A vs B (patch-inert check): {note}")
+    return 0
+
+
+def compare(base_path: str, fork_path: str) -> int:
+    """Print both result files side by side and run the patch-inert check across wheels."""
+    base = json.load(open(base_path, encoding="utf-8"))["results"]
+    fork = json.load(open(fork_path, encoding="utf-8"))["results"]
+    merged = {**base, **fork}
+
+    print(f"{'arm':<4} {'n':>3}  {'wall clock (median [range])':<28} {'penalty':<24}")
+    print("-" * 72)
+    for key in sorted(merged):
+        rows = merged[key]
+        print(f"{key:<4} {len(rows):>3}  {_summarise(rows, 'wall_clock'):<28} "
+              f"{_summarise(rows, 'penalty'):<24}")
+
+    a, b = base.get("A") or [], fork.get("B") or []
+    if not (a and b):
+        print("\nPatch-inert check: SKIPPED (need arm A in the base file, B in the fork file)")
+        return 0
+    # The claim under test: with both features disabled, the patched binary behaves like the
+    # unpatched one. If it does not, nothing in C/D/E can be attributed to the features.
+    ma = statistics.median(r["penalty"] for r in a if r["penalty"] is not None)
+    mb = statistics.median(r["penalty"] for r in b if r["penalty"] is not None)
+    lo_a, hi_a = min(r["penalty"] for r in a), max(r["penalty"] for r in a)
+    lo_b, hi_b = min(r["penalty"] for r in b), max(r["penalty"] for r in b)
+    overlap = lo_a <= hi_b and lo_b <= hi_a
+    print(f"\nPatch-inert check (A vs B): median {ma} vs {mb}, "
+          f"ranges [{lo_a}-{hi_a}] vs [{lo_b}-{hi_b}]")
+    print("  " + ("OK: distributions overlap; the patch looks inert when disabled."
+                  if overlap else
+                  "WARNING: ranges are disjoint. The patched binary differs from the "
+                  "unpatched one even with both features off -- investigate before "
+                  "trusting C/D/E."))
     return 0
 
 

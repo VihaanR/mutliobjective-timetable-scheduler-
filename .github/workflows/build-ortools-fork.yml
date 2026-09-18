@@ -21,7 +21,7 @@ env:
 
 jobs:
   wheel:
-    name: wheel (${{ matrix.os }})
+    name: wheel (${{ matrix.os }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.os }}
     # Windows is the deliverable: everyone on this project runs Windows, so a failed
     # Windows wheel is a failed build, not a degraded one. (It is still the riskier
@@ -31,6 +31,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022]
+        # "stock" is the same upstream commit with the patch NOT applied. It is the only
+        # valid baseline: the pip wheel is 9.9.x while this tree is 9.15.x, so benchmarking
+        # against pip would measure six minor releases of upstream improvement and credit
+        # them to the fork.
+        variant: [fork, stock]
     steps:
       - name: Check out this project (for the patch)
         uses: actions/checkout@v4
@@ -63,6 +68,7 @@ jobs:
           echo "upstream HEAD: $(git rev-parse HEAD)"
 
       - name: Apply the timetabling patch
+        if: matrix.variant == 'fork'
         shell: bash
         working-directory: or-tools
         run: |
@@ -97,6 +103,7 @@ jobs:
       # builds but lacks the new enum is a silent failure -- the project's HAS_TIMETABLE_FORK
       # probe would just fall back to stock and nobody would notice.
       - name: Verify the wheel is the fork, not stock
+        if: matrix.variant == 'fork'
         shell: bash
         run: |
           python -m pip install --upgrade pip
@@ -116,12 +123,27 @@ jobs:
       # strategy outright, and ignore_names stripped the tags so the subsolver never
       # registered. Both produced a wheel that imported perfectly. So: actually solve.
       - name: Smoke test - solve a tagged model and assert the fork engages
+        if: matrix.variant == 'fork'
         shell: bash
         run: python project/third_party/or-tools-fork/smoke_test.py
 
+      - name: Verify the baseline wheel is genuinely unpatched
+        if: matrix.variant == 'stock'
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import sys
+          from ortools.sat.python import cp_model
+          if getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP", None) is not None:
+              sys.exit("FAIL: the baseline wheel contains the fork - it is not a baseline")
+          print("OK: baseline wheel is unpatched stock at the same upstream commit")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ortools-fork-${{ matrix.os }}
+          name: ortools-${{ matrix.variant }}-${{ matrix.os }}
           path: dist/*.whl
 
   release:

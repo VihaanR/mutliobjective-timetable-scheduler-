@@ -528,5 +528,53 @@ The arms:
 
 Arm B is the one reviewers ask about and the easiest to skip.
 
+### 6.2 How to report the result, including a null one
+
+Decide this before looking at the numbers. Choosing a framing afterwards is how honest projects
+drift into overclaiming.
+
+**If arm E beats arm A.** Report the median and spread of both, state the number of seeds, and
+attribute the gain only as far as the ablations support it. Arm C (static ordering) and arm D
+(neighbourhood alone) exist to decompose it: if C already captures most of the gain, the
+contribution is *variable ordering*, which is largely reachable without a fork, and the paper
+should say so. The fork's distinctive claim is the gap between C and E — live re-ranking against
+frozen ordering.
+
+**If arm E matches arm A.** This is a legitimate result and it should be reported as one. The
+defensible framing is: *two structure-aware specialisations were implemented at the solver's
+source level; on an instance of this size and shape neither produced a statistically
+distinguishable improvement over the stock portfolio.* That is a real finding about CP-SAT —
+its default portfolio is strong enough that hand-written domain neighbourhoods do not
+automatically beat it — and it is far more valuable than a two-run speedup that nobody can
+reproduce.
+
+A null result stays publishable **only if arm B is clean**. If B matches A, the patch is proven
+inert when disabled, so the null is a genuine measurement rather than a broken build. If B
+differs from A, nothing else in the table can be trusted. That is the entire reason arm B exists.
+
+**What not to do.** Do not report the best of several runs. Do not drop seeds that came out
+badly. Do not quote a single-run speedup. On this workload an unmodified model was measured
+flipping PASS/PASS/PASS/FAIL/FAIL, so a cherry-picked pair of runs can manufacture almost any
+conclusion in either direction.
+
+**Scope the claim to what was measured.** One instance, one machine, one time budget. The honest
+sentence is "on the DJSCE CSE-DS reference instance", not "for university timetabling".
+
+### 6.3 What is fair to claim already
+
+Independent of any timing result, the following are established and defensible:
+
+- Two specialisations were implemented at solver source level, in 8 files, adding 241 lines while
+  modifying exactly one existing line and deleting none.
+- Neither is reachable through the public API, with the reason stated precisely: `NewBoolVar`
+  gives every placement variable domain size 2, so `CHOOSE_MIN_DOMAIN_SIZE` cannot distinguish
+  them, and no upstream neighbourhood generator can express a division-day fragment.
+- The design routes application structure through variable names, which survive presolve, so the
+  same model text is emitted to stock and forked solvers alike — making the comparison valid.
+- The patch is inert by construction on any model lacking the tags, and the code paths that
+  enable it are gated on their presence.
+
+These are claims about *design and engineering*, and they do not depend on the benchmark outcome.
+
 The cheapest confirmation that a run is actually using the fork is that `division_day_lns` appears in
 CP-SAT's subsolver list in the solve log; on a stock build it is absent.

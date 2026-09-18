@@ -1,0 +1,4 @@
+# A patch file with CRLF endings fails `git apply` on Linux, which is where CI builds
+# the fork. Pin these to LF regardless of the checkout platform.
+*.patch text eol=lf
+*.sh    text eol=lf

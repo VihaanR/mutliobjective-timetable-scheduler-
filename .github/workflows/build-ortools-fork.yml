@@ -153,13 +153,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Fork and baseline wheels share a filename (both are ortools-9.15.9999-cp311-...),
+      # so downloading all four and globbing would publish whichever landed last -- a race
+      # that could ship the UNPATCHED baseline to users as "the fork". Take fork only.
       - uses: actions/download-artifact@v4
         with:
+          pattern: ortools-fork-*
           path: artifacts
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*.whl
           body: |
+            **Patched (fork) wheels only.** The unpatched baseline wheels built by the same
+            run are benchmark controls and are deliberately not published here; they carry
+            an identical filename and would be indistinguishable once downloaded.
+
             Modified OR-Tools built from `third_party/or-tools-fork/timetabling.patch`
             against upstream google/or-tools @ `98c165af62df62b3056c2ee0fca66b24e79097cb`.
 

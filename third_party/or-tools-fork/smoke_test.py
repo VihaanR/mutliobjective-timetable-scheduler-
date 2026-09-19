@@ -68,56 +68,62 @@ def solve(model, *, use_strategy_vars=None, ignore_names=True, seconds=20):
     return solver, status, "\n".join(log)
 
 
-print("1. the wheel exposes the fork")
-strategy = getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP", None)
-check(strategy is not None, "CHOOSE_MIN_UNFIXED_IN_GROUP is exported to Python")
-if strategy is None:
-    print("\nSTOCK wheel -- nothing further to test.")
-    sys.exit(1)
+def main() -> int:
+    print("1. the wheel exposes the fork")
+    strategy = getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP", None)
+    check(strategy is not None, "CHOOSE_MIN_UNFIXED_IN_GROUP is exported to Python")
+    if strategy is None:
+        print("\nSTOCK wheel -- nothing further to test.")
+        return 1
 
-print("\n2. the subsolver registers and runs (needs ignore_names=false)")
-model, _ = build_model()
-solver, status, log = solve(model, ignore_names=False)
-registered = "division_day_lns" in log
-check(
-    registered,
-    "division_day_lns appears in CP-SAT's subsolver list",
-    "" if registered else "the tags were stripped or the subsolver did not register",
-)
-subsolver_line = next((l for l in log.splitlines() if "interleaved subsolvers" in l), "")
-if subsolver_line:
-    print(f"       {subsolver_line.strip()[:200]}")
+    print("\n2. the subsolver registers and runs (needs ignore_names=false)")
+    model, _ = build_model()
+    solver, status, log = solve(model, ignore_names=False)
+    registered = "division_day_lns" in log
+    check(
+        registered,
+        "division_day_lns appears in CP-SAT's subsolver list",
+        "" if registered else "the tags were stripped or the subsolver did not register",
+    )
+    subsolver_line = next((l for l in log.splitlines() if "interleaved subsolvers" in l), "")
+    if subsolver_line:
+        print(f"       {subsolver_line.strip()[:200]}")
 
-print("\n3. a model using the new strategy is accepted by the validator")
-model2, all_vars = build_model()
-solver2, status2, _ = solve(model2, use_strategy_vars=all_vars, ignore_names=False)
-name2 = solver2.StatusName(status2)
-check(
-    status2 != cp_model.MODEL_INVALID,
-    "model with CHOOSE_MIN_UNFIXED_IN_GROUP is not rejected",
-    f"status={name2} info={solver2.ResponseProto().solution_info}"
-    if status2 == cp_model.MODEL_INVALID
-    else f"status={name2}",
-)
-check(
-    status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE),
-    "that model actually solves",
-    f"status={name2}",
-)
+    print("\n3. a model using the new strategy is accepted by the validator")
+    model2, all_vars = build_model()
+    solver2, status2, _ = solve(model2, use_strategy_vars=all_vars, ignore_names=False)
+    name2 = solver2.StatusName(status2)
+    check(
+        status2 != cp_model.MODEL_INVALID,
+        "model with CHOOSE_MIN_UNFIXED_IN_GROUP is not rejected",
+        f"status={name2} info={solver2.ResponseProto().solution_info}"
+        if status2 == cp_model.MODEL_INVALID
+        else f"status={name2}",
+    )
+    check(
+        status2 in (cp_model.OPTIMAL, cp_model.FEASIBLE),
+        "that model actually solves",
+        f"status={name2}",
+    )
 
-print("\n4. the fork stays inert on an untagged model")
-plain = cp_model.CpModel()
-v = [plain.NewBoolVar(f"y_{i}") for i in range(20)]
-plain.AddExactlyOne(v)
-plain.Minimize(sum(i * v[i] for i in range(20)))
-_, status3, log3 = solve(plain, seconds=5, ignore_names=False)
-check(
-    "division_day_lns" not in log3,
-    "division_day_lns does not register without @G= tags",
-)
+    print("\n4. the fork stays inert on an untagged model")
+    plain = cp_model.CpModel()
+    v = [plain.NewBoolVar(f"y_{i}") for i in range(20)]
+    plain.AddExactlyOne(v)
+    plain.Minimize(sum(i * v[i] for i in range(20)))
+    _, status3, log3 = solve(plain, seconds=5, ignore_names=False)
+    check(
+        "division_day_lns" not in log3,
+        "division_day_lns does not register without @G= tags",
+    )
 
-print()
-if failures:
-    print(f"SMOKE TEST FAILED: {len(failures)} check(s) -- {'; '.join(failures)}")
-    sys.exit(1)
-print("SMOKE TEST PASSED: the fork is present, registers, validates and solves.")
+    print()
+    if failures:
+        print(f"SMOKE TEST FAILED: {len(failures)} check(s) -- {'; '.join(failures)}")
+        return 1
+    print("SMOKE TEST PASSED: the fork is present, registers, validates and solves.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

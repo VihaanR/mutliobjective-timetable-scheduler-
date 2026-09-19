@@ -17,27 +17,35 @@ just set a parameter" reviews — Section 2 exists so you can pre-empt that.
 
 ## 0. Status — what is implemented right now
 
-Two of the Section-4 proposals are written and sitting in `../or-tools-reference/`
-(a sparse checkout of `google/or-tools` @ `98c165a`, `stable`). `git diff` there produces the
-patch series, also exported to `or_tools_timetabling_fork.patch`.
+**This section is the historical planning record. The work is done — see
+[`../CHANGES_DONE.md`](../CHANGES_DONE.md) for the implemented result, the measured outcome, and
+the details that superseded the estimates below.**
 
-**Verification status — read this before quoting any of it in the paper:**
+The patch is vendored at `third_party/or-tools-fork/timetabling.patch` — **9 files, 245
+insertions, 2 modified lines** against `google/or-tools` @ `98c165af62df62b3056c2ee0fca66b24e79097cb`.
+It grew from the 7 files planned here: the proto enum also had to be whitelisted in
+`cp_model_checker.cc` and re-exported by hand in `ortools/sat/python/cp_model.py`, neither of
+which was foreseen when this guide was written.
 
 | Claim | Status |
 |---|---|
-| The new algorithms are correct | **verified** — `or_tools_fork_algo_test.cc`, 4558 real variable names, all checks pass |
-| Python side still solves correctly | **verified** — `OPTIMAL`, 0 hard violations, full pytest suite |
+| The new algorithms are correct | **verified** — `third_party/or-tools-fork/algo_test.cc`, 4558 real variable names, all checks pass |
 | No build-file changes needed | **verified** — `cp_model_lns` and `cp_model_search` already dep on `cp_model_utils` in `BUILD.bazel` |
-| The patch compiles inside OR-Tools | **NOT verified** — no MSVC/CMake on this machine |
-| It improves solve time or quality | **NOT measured** — requires a build first |
+| The patch compiles inside OR-Tools | **verified** — CI builds Linux and Windows wheels from upstream + patch |
+| Both features are active at runtime | **verified** — `smoke_test.py` 5/5; `division_day_lns` appears in CP-SAT's subsolver list |
+| Python side still solves correctly | **verified** — `OPTIMAL`, 0 hard violations on the reference instance |
+| It improves solve time or quality | **measured — NO significant improvement.** 20 seeds/arm: 95% vs 75% proof rate, Fisher *p* = 0.182; no speed-up; the Tier-0 ablation matches the fork. See `CHANGES_DONE.md` §6.3 |
 
-The last two are the gap. Everything else is evidence you can cite.
+One finding not anticipated anywhere below: `SatParameters.ignore_names` defaults to **true**, so
+CP-SAT discards every variable name when copying the user model into presolve. Both features read
+their structure from those names, so without `ignore_names = false` the fork compiles, loads,
+solves correctly — and behaves exactly like stock, silently.
 
 | Proposal | Status | Files touched |
 |---|---|---|
-| 4.1 Division-day LNS neighborhood | **written** | `cp_model_lns.h`, `cp_model_lns.cc`, `cp_model_solver.cc` |
-| 4.3 MRV branching (`CHOOSE_MIN_UNFIXED_IN_GROUP`) | **written** | `cp_model.proto`, `cp_model_search.cc` |
-| shared: domain-tag parser | **written** | `cp_model_utils.h`, `cp_model_utils.cc` |
+| 4.1 Division-day LNS neighborhood | **shipped** | `cp_model_lns.h`, `cp_model_lns.cc`, `cp_model_solver.cc` |
+| 4.3 MRV branching (`CHOOSE_MIN_UNFIXED_IN_GROUP`) | **shipped** | `cp_model.proto`, `cp_model_search.cc`, `cp_model_checker.cc`, `python/cp_model.py` |
+| shared: domain-tag parser | **shipped** | `cp_model_utils.h`, `cp_model_utils.cc` |
 | 4.2 / 4.4 / 4.5 | not started (future work) | — |
 
 Total: **7 files, ~200 added lines, 1 modified line, nothing deleted.**
@@ -85,14 +93,14 @@ without it the whole change is silently inert. This is exactly the sort of trap 
 
 ```bash
 # 1. Algorithm-level verification (no OR-Tools build required)
-g++ -std=c++17 -Wall -Wextra -O2 -o algo_test docs/or_tools_fork_algo_test.cc
+g++ -std=c++17 -Wall -Wextra -O2 -o algo_test third_party/or-tools-fork/algo_test.cc
 ./algo_test docs/or_tools_fork_test_varnames.txt      # -> ALL CHECKS PASSED
 
 # 2. Python side unaffected
 python -m pytest tests/ -q
 ```
 
-`or_tools_fork_algo_test.cc` lifts the three new algorithms out of the patch verbatim (only
+`third_party/or-tools-fork/algo_test.cc` lifts the three new algorithms out of the patch verbatim (only
 `absl::string_view` -> `std::string_view`) and runs them over the 4558 real variable names this
 model emits. It independently reproduces the same group counts Python computes (10 / 76 / 4250 /
 308), checks parsing edge cases, checks the neighborhood sampler covers every division-day and
@@ -106,9 +114,9 @@ The build is blocked on toolchain, not on code. OR-Tools on Windows needs:
   `g++` present on this machine is enough for the standalone algorithm test above, but not for
   OR-Tools itself.
 - **CMake** >= 3.18.
-- A **full** clone (the `or-tools-reference` checkout is sparse — 9 files). Either
+- A **full** clone of upstream at the pinned commit. `third_party/or-tools-fork/apply_fork.sh`
   `git sparse-checkout disable` in it, or clone upstream fresh and apply
-  `or_tools_timetabling_fork.patch`.
+  does this for you, or CI does it on every `fork-v*` tag.
 - ~20-30 GB free disk and 1-3 hours for the first build (it builds abseil, protobuf, re2, SCIP,
   CoinOR/CBC and friends from source).
 

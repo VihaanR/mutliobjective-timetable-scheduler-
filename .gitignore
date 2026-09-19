@@ -27,3 +27,6 @@ research/fork_benchmark_results.json
 
 # CP-SAT model dumps (cp_model_dump_models), used to prove the tags survive presolve.
 .dump/
+
+# Runtime upload directory, created by calendar.get_upload_dir() on startup.
+webapp/uploads/

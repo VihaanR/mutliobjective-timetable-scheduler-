@@ -17,7 +17,6 @@ The complete change is **9 files, 245 insertions, 2 modified lines, 0 deletions*
 
 - **[CHANGES_DONE.md](CHANGES_DONE.md)** — the full technical write-up: every code change with
   rationale, why parameters cannot express these features, and the measured results.
-- **[QUICKSTART.md](QUICKSTART.md)** — the condensed install path.
 
 ---
 
@@ -120,7 +119,7 @@ the fork at import and enables both features automatically.
 
 ```
 .
-├── README.md  QUICKSTART.md  CHANGES_DONE.md
+├── README.md  CHANGES_DONE.md
 ├── requirements.txt  pytest.ini
 │
 ├── data.py  model.py  solver.py            SY-reference pipeline: the original
@@ -178,6 +177,26 @@ why `soft_cost` is not the right metric and why 5 seeds was not enough, is in
 [CHANGES_DONE.md §6.3](CHANGES_DONE.md).
 
 ---
+
+## Running on stock OR-Tools instead
+
+The project is deliberately fail-safe: on a stock `pip install ortools` it drops back to plain
+CP-SAT, emits no structure tags, and never names the fork's subsolver. Nothing breaks — you simply
+do not get the modified behaviour. That is also what makes a stock-vs-fork comparison valid: both
+builds solve a byte-identical model.
+
+## Reproducing the benchmark
+
+The baseline must be the **unpatched build of the same upstream commit**, which CI also produces
+(`ortools-stock-*` artifacts) — never the PyPI wheel. PyPI ships 9.9.x while this tree is 9.15.x,
+so comparing against it measures six minor releases of upstream improvement and credits them to
+the fork. Arms A and B therefore live in different virtualenvs and cannot run in one interpreter.
+
+```bash
+.venv-baseline/Scripts/python -m research.fork_benchmark --arms A --seeds 20 --out research/base20.json
+.venv-fork/Scripts/python     -m research.fork_benchmark --arms B C D E --seeds 20 --out research/fork20.json
+.venv-fork/Scripts/python     -m research.fork_benchmark --compare research/base20.json research/fork20.json
+```
 
 ## Tests
 

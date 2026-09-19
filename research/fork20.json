@@ -1,0 +1,854 @@
+{
+  "arms": {
+    "B": {
+      "key": "B",
+      "label": "fork, both features off (must match A)",
+      "env": {
+        "TIMETABLE_MRV": "off",
+        "TIMETABLE_FORK_TAGS": "0",
+        "TIMETABLE_DIVISION_DAY_LNS": "0"
+      },
+      "requires_fork": true
+    },
+    "C": {
+      "key": "C",
+      "label": "static ordering only (Tier-0 ablation)",
+      "env": {
+        "TIMETABLE_MRV": "static",
+        "TIMETABLE_FORK_TAGS": "1",
+        "TIMETABLE_DIVISION_DAY_LNS": "0"
+      },
+      "requires_fork": true
+    },
+    "D": {
+      "key": "D",
+      "label": "division_day_lns only",
+      "env": {
+        "TIMETABLE_MRV": "off",
+        "TIMETABLE_FORK_TAGS": "1",
+        "TIMETABLE_DIVISION_DAY_LNS": "1"
+      },
+      "requires_fork": true
+    },
+    "E": {
+      "key": "E",
+      "label": "both features (headline)",
+      "env": {
+        "TIMETABLE_MRV": "dynamic",
+        "TIMETABLE_FORK_TAGS": "1",
+        "TIMETABLE_DIVISION_DAY_LNS": "1"
+      },
+      "requires_fork": true
+    }
+  },
+  "results": {
+    "B": [
+      {
+        "seed": 0,
+        "status": "OPTIMAL",
+        "wall_clock": 93.895,
+        "objective": 495.0,
+        "penalty": 115.3,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 1,
+        "status": "FEASIBLE",
+        "wall_clock": 122.588,
+        "objective": 540.0,
+        "penalty": 124.21666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 2,
+        "status": "FEASIBLE",
+        "wall_clock": 122.433,
+        "objective": 540.0,
+        "penalty": 120.26666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 3,
+        "status": "OPTIMAL",
+        "wall_clock": 74.304,
+        "objective": 495.0,
+        "penalty": 135.01666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 4,
+        "status": "OPTIMAL",
+        "wall_clock": 77.746,
+        "objective": 495.0,
+        "penalty": 106.1,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 5,
+        "status": "OPTIMAL",
+        "wall_clock": 66.189,
+        "objective": 495.0,
+        "penalty": 114.43333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 6,
+        "status": "FEASIBLE",
+        "wall_clock": 122.708,
+        "objective": 540.0,
+        "penalty": 124.68333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 7,
+        "status": "OPTIMAL",
+        "wall_clock": 72.647,
+        "objective": 495.0,
+        "penalty": 108.46666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 8,
+        "status": "OPTIMAL",
+        "wall_clock": 67.427,
+        "objective": 495.0,
+        "penalty": 134.21666666666664,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 9,
+        "status": "OPTIMAL",
+        "wall_clock": 44.057,
+        "objective": 495.0,
+        "penalty": 115.01666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 10,
+        "status": "OPTIMAL",
+        "wall_clock": 58.349,
+        "objective": 495.0,
+        "penalty": 124.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 11,
+        "status": "OPTIMAL",
+        "wall_clock": 57.478,
+        "objective": 495.0,
+        "penalty": 124.46666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 12,
+        "status": "FEASIBLE",
+        "wall_clock": 121.162,
+        "objective": 525.0,
+        "penalty": 124.71666666666668,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 13,
+        "status": "OPTIMAL",
+        "wall_clock": 32.868,
+        "objective": 495.0,
+        "penalty": 114.13333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 14,
+        "status": "OPTIMAL",
+        "wall_clock": 53.485,
+        "objective": 495.0,
+        "penalty": 119.68333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 15,
+        "status": "OPTIMAL",
+        "wall_clock": 115.747,
+        "objective": 495.0,
+        "penalty": 128.21666666666664,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 16,
+        "status": "FEASIBLE",
+        "wall_clock": 123.161,
+        "objective": 510.0,
+        "penalty": 115.01666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 17,
+        "status": "OPTIMAL",
+        "wall_clock": 94.906,
+        "objective": 495.0,
+        "penalty": 115.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 18,
+        "status": "OPTIMAL",
+        "wall_clock": 74.527,
+        "objective": 495.0,
+        "penalty": 130.76666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 19,
+        "status": "FEASIBLE",
+        "wall_clock": 122.525,
+        "objective": 510.0,
+        "penalty": 125.60000000000001,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      }
+    ],
+    "C": [
+      {
+        "seed": 0,
+        "status": "OPTIMAL",
+        "wall_clock": 93.345,
+        "objective": 495.0,
+        "penalty": 131.93333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 1,
+        "status": "OPTIMAL",
+        "wall_clock": 64.497,
+        "objective": 495.0,
+        "penalty": 120.21666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 2,
+        "status": "FEASIBLE",
+        "wall_clock": 121.823,
+        "objective": 495.0,
+        "penalty": 129.96666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 3,
+        "status": "OPTIMAL",
+        "wall_clock": 65.338,
+        "objective": 495.0,
+        "penalty": 123.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 4,
+        "status": "OPTIMAL",
+        "wall_clock": 28.509,
+        "objective": 495.0,
+        "penalty": 109.96666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 5,
+        "status": "OPTIMAL",
+        "wall_clock": 41.115,
+        "objective": 495.0,
+        "penalty": 124.01666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 6,
+        "status": "OPTIMAL",
+        "wall_clock": 67.503,
+        "objective": 495.0,
+        "penalty": 114.96666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 7,
+        "status": "OPTIMAL",
+        "wall_clock": 97.743,
+        "objective": 495.0,
+        "penalty": 125.60000000000001,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 8,
+        "status": "OPTIMAL",
+        "wall_clock": 104.797,
+        "objective": 495.0,
+        "penalty": 122.21666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 9,
+        "status": "FEASIBLE",
+        "wall_clock": 122.277,
+        "objective": 510.0,
+        "penalty": 107.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 10,
+        "status": "OPTIMAL",
+        "wall_clock": 83.526,
+        "objective": 495.0,
+        "penalty": 106.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 11,
+        "status": "OPTIMAL",
+        "wall_clock": 65.468,
+        "objective": 495.0,
+        "penalty": 126.38333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 12,
+        "status": "OPTIMAL",
+        "wall_clock": 52.225,
+        "objective": 495.0,
+        "penalty": 121.96666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 13,
+        "status": "OPTIMAL",
+        "wall_clock": 78.778,
+        "objective": 495.0,
+        "penalty": 118.38333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 14,
+        "status": "OPTIMAL",
+        "wall_clock": 108.839,
+        "objective": 495.0,
+        "penalty": 115.3,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 15,
+        "status": "OPTIMAL",
+        "wall_clock": 106.02,
+        "objective": 495.0,
+        "penalty": 119.38333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 16,
+        "status": "OPTIMAL",
+        "wall_clock": 36.322,
+        "objective": 495.0,
+        "penalty": 124.46666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 17,
+        "status": "OPTIMAL",
+        "wall_clock": 116.407,
+        "objective": 495.0,
+        "penalty": 130.85000000000002,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 18,
+        "status": "OPTIMAL",
+        "wall_clock": 47.076,
+        "objective": 495.0,
+        "penalty": 110.01666666666668,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 19,
+        "status": "OPTIMAL",
+        "wall_clock": 67.828,
+        "objective": 495.0,
+        "penalty": 116.93333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      }
+    ],
+    "D": [
+      {
+        "seed": 0,
+        "status": "OPTIMAL",
+        "wall_clock": 45.762,
+        "objective": 495.0,
+        "penalty": 111.38333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 1,
+        "status": "OPTIMAL",
+        "wall_clock": 118.083,
+        "objective": 495.0,
+        "penalty": 128.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 2,
+        "status": "OPTIMAL",
+        "wall_clock": 57.969,
+        "objective": 495.0,
+        "penalty": 113.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 3,
+        "status": "OPTIMAL",
+        "wall_clock": 106.315,
+        "objective": 495.0,
+        "penalty": 129.43333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 4,
+        "status": "OPTIMAL",
+        "wall_clock": 39.497,
+        "objective": 495.0,
+        "penalty": 122.01666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 5,
+        "status": "OPTIMAL",
+        "wall_clock": 43.72,
+        "objective": 495.0,
+        "penalty": 113.13333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 6,
+        "status": "OPTIMAL",
+        "wall_clock": 51.586,
+        "objective": 495.0,
+        "penalty": 123.35,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 7,
+        "status": "OPTIMAL",
+        "wall_clock": 48.094,
+        "objective": 495.0,
+        "penalty": 112.76666666666668,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 8,
+        "status": "OPTIMAL",
+        "wall_clock": 104.479,
+        "objective": 495.0,
+        "penalty": 133.51666666666665,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 9,
+        "status": "OPTIMAL",
+        "wall_clock": 73.079,
+        "objective": 495.0,
+        "penalty": 117.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 10,
+        "status": "FEASIBLE",
+        "wall_clock": 124.125,
+        "objective": 495.0,
+        "penalty": 117.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 11,
+        "status": "FEASIBLE",
+        "wall_clock": 123.285,
+        "objective": 510.0,
+        "penalty": 118.68333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 12,
+        "status": "OPTIMAL",
+        "wall_clock": 78.343,
+        "objective": 495.0,
+        "penalty": 123.3,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 13,
+        "status": "FEASIBLE",
+        "wall_clock": 122.716,
+        "objective": 510.0,
+        "penalty": 117.26666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 14,
+        "status": "OPTIMAL",
+        "wall_clock": 80.138,
+        "objective": 495.0,
+        "penalty": 113.43333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 15,
+        "status": "OPTIMAL",
+        "wall_clock": 111.768,
+        "objective": 495.0,
+        "penalty": 133.68333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 16,
+        "status": "OPTIMAL",
+        "wall_clock": 75.237,
+        "objective": 495.0,
+        "penalty": 108.30000000000001,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 17,
+        "status": "OPTIMAL",
+        "wall_clock": 33.039,
+        "objective": 495.0,
+        "penalty": 115.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 18,
+        "status": "OPTIMAL",
+        "wall_clock": 30.954,
+        "objective": 495.0,
+        "penalty": 110.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 19,
+        "status": "FEASIBLE",
+        "wall_clock": 121.131,
+        "objective": 495.0,
+        "penalty": 110.38333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      }
+    ],
+    "E": [
+      {
+        "seed": 0,
+        "status": "OPTIMAL",
+        "wall_clock": 62.106,
+        "objective": 495.0,
+        "penalty": 111.05,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 1,
+        "status": "OPTIMAL",
+        "wall_clock": 65.67,
+        "objective": 495.0,
+        "penalty": 113.13333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 2,
+        "status": "FEASIBLE",
+        "wall_clock": 121.625,
+        "objective": 510.0,
+        "penalty": 120.76666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 3,
+        "status": "OPTIMAL",
+        "wall_clock": 54.301,
+        "objective": 495.0,
+        "penalty": 122.05,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 4,
+        "status": "OPTIMAL",
+        "wall_clock": 68.641,
+        "objective": 495.0,
+        "penalty": 112.88333333333333,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 5,
+        "status": "OPTIMAL",
+        "wall_clock": 121.169,
+        "objective": 495.0,
+        "penalty": 131.43333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 6,
+        "status": "OPTIMAL",
+        "wall_clock": 98.382,
+        "objective": 495.0,
+        "penalty": 116.93333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 7,
+        "status": "OPTIMAL",
+        "wall_clock": 117.454,
+        "objective": 495.0,
+        "penalty": 112.51666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 8,
+        "status": "OPTIMAL",
+        "wall_clock": 67.152,
+        "objective": 495.0,
+        "penalty": 126.6,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 9,
+        "status": "OPTIMAL",
+        "wall_clock": 70.367,
+        "objective": 495.0,
+        "penalty": 120.6,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 10,
+        "status": "OPTIMAL",
+        "wall_clock": 38.098,
+        "objective": 495.0,
+        "penalty": 135.1,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 11,
+        "status": "OPTIMAL",
+        "wall_clock": 92.084,
+        "objective": 495.0,
+        "penalty": 114.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 12,
+        "status": "OPTIMAL",
+        "wall_clock": 57.45,
+        "objective": 495.0,
+        "penalty": 121.93333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 13,
+        "status": "OPTIMAL",
+        "wall_clock": 106.942,
+        "objective": 495.0,
+        "penalty": 120.3,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 14,
+        "status": "OPTIMAL",
+        "wall_clock": 64.634,
+        "objective": 495.0,
+        "penalty": 112.6,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 15,
+        "status": "OPTIMAL",
+        "wall_clock": 73.039,
+        "objective": 495.0,
+        "penalty": 113.93333333333334,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 16,
+        "status": "OPTIMAL",
+        "wall_clock": 54.761,
+        "objective": 495.0,
+        "penalty": 124.93333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 17,
+        "status": "OPTIMAL",
+        "wall_clock": 63.009,
+        "objective": 495.0,
+        "penalty": 111.85,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 18,
+        "status": "OPTIMAL",
+        "wall_clock": 111.714,
+        "objective": 495.0,
+        "penalty": 124.93333333333332,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      },
+      {
+        "seed": 19,
+        "status": "OPTIMAL",
+        "wall_clock": 42.589,
+        "objective": 495.0,
+        "penalty": 114.51666666666667,
+        "hard_violations": 0,
+        "assignments": 114,
+        "fork_build": true
+      }
+    ]
+  }
+}

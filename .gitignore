@@ -19,3 +19,11 @@ env/
 webapp/data/
 webapp/uploads/
 research/fork_benchmark_results.json
+
+# Benchmark virtualenvs: each holds a ~45MB compiled OR-Tools build (fork / unpatched
+# baseline). Rebuild them from the wheels on the Releases page, never commit them.
+.venv-fork/
+.venv-baseline/
+
+# CP-SAT model dumps (cp_model_dump_models), used to prove the tags survive presolve.
+.dump/

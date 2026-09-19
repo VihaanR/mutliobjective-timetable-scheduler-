@@ -91,6 +91,30 @@ def _run_trial(seed: int, time_limit: float) -> dict:
     }
 
 
+def _optimality(rows: list[dict]) -> str:
+    """Proof rate and time-to-proof -- the metrics that actually compare solver strength.
+
+    NOT penalty. Measured on this project: 13 runs all reached the proven optimum
+    (objective 495.0) and their post-hoc score().soft_cost still spanned 109.2 to 130.9.
+    That spread is arbitrary tie-breaking among equally-optimal solutions, because
+    soft_cost is not the quantity CP-SAT minimises. Ranking arms by it ranks noise.
+    """
+    if not rows:
+        return "n/a"
+    opt = [r for r in rows if r.get("status") == "OPTIMAL"]
+    if not opt:
+        return f"0/{len(rows)} proved"
+    times = [r["wall_clock"] for r in opt]
+    med = statistics.median(times)
+    return f"{len(opt)}/{len(rows)} proved  {med:6.1f}s [{min(times):.1f}-{max(times):.1f}]"
+
+
+def _objectives(rows: list[dict]) -> str:
+    """Distinct objective values reached. Arms solving the same model must agree here."""
+    vals = sorted({r["objective"] for r in rows if r.get("objective") is not None})
+    return ", ".join(f"{v:g}" for v in vals) if vals else "n/a"
+
+
 def _summarise(rows: list[dict], field: str) -> str:
     """Median and full range. Never a bare mean: one OOM-slowed run would dominate it."""
     vals = [r[field] for r in rows if isinstance(r.get(field), (int, float))]
@@ -161,11 +185,13 @@ def main() -> int:
                   f"penalty {_summarise(rows, 'penalty')}\n")
 
     print("\n" + "=" * 72)
-    print(f"{'arm':<4} {'n':>3}  {'wall clock (median [range])':<28} {'penalty':<24}")
-    print("-" * 72)
+    print(f"{'arm':<4} {'optimality (rate, time-to-proof)':<40} {'objective(s)':<16} {'penalty*':<20}")
+    print("-" * 86)
     for key, rows in results.items():
-        print(f"{key:<4} {len(rows):>3}  {_summarise(rows, 'wall_clock'):<28} "
-              f"{_summarise(rows, 'penalty'):<24}")
+        print(f"{key:<4} {_optimality(rows):<40} {_objectives(rows):<16} "
+              f"{_summarise(rows, 'penalty'):<20}")
+    print("* post-hoc soft_cost, NOT the objective CP-SAT minimises; it differs between")
+    print("  equally-optimal solutions, so it ranks noise. Secondary information only.")
 
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump({"arms": {k: asdict(ARMS[k]) for k in results}, "results": results},
@@ -181,12 +207,14 @@ def compare(base_path: str, fork_path: str) -> int:
     fork = json.load(open(fork_path, encoding="utf-8"))["results"]
     merged = {**base, **fork}
 
-    print(f"{'arm':<4} {'n':>3}  {'wall clock (median [range])':<28} {'penalty':<24}")
-    print("-" * 72)
+    print(f"{'arm':<4} {'optimality (rate, time-to-proof)':<40} {'objective(s)':<16} {'penalty*':<20}")
+    print("-" * 86)
     for key in sorted(merged):
         rows = merged[key]
-        print(f"{key:<4} {len(rows):>3}  {_summarise(rows, 'wall_clock'):<28} "
-              f"{_summarise(rows, 'penalty'):<24}")
+        print(f"{key:<4} {_optimality(rows):<40} {_objectives(rows):<16} "
+              f"{_summarise(rows, 'penalty'):<20}")
+    print("* post-hoc soft_cost, NOT the objective CP-SAT minimises; it differs between")
+    print("  equally-optimal solutions, so it ranks noise. Secondary information only.")
 
     a, b = base.get("A") or [], fork.get("B") or []
     if not (a and b):

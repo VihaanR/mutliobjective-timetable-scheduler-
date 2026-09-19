@@ -548,10 +548,37 @@ just tune the parameters?"*
   model: **10 `@G=` groups, 76 `@R=` groups, 4,250 tagged, 308 untagged — all checks passed**,
   independently reproducing the counts Python computes on the same model.
 - The patch adds no new build-dependency edges.
+- **It compiles inside the full OR-Tools tree.** CI builds wheels for `linux_x86_64` and
+  `win_amd64` (Python 3.11) from upstream `98c165af`, and publishes them as a Release.
+- **Both features are active at runtime.** `third_party/or-tools-fork/smoke_test.py` passes 4/4:
+  the enum reaches Python, `division_day_lns` appears in CP-SAT's subsolver list (taking it from
+  9 interleaved subsolvers to 10), a model using the new strategy is accepted by the validator and
+  solves, and the fork stays inert on an untagged model.
+- **It solves the real instance.** On the DJSCE CSE-DS reference problem: `OPTIMAL`, 114
+  assignments, 0 hard violations.
 
-**Not yet verified:** that the patch compiles inside the full OR-Tools tree, and that it improves
-solve time or solution quality. Both require a completed build. **Neither should be claimed until
-then.**
+**Measured, and reported in §6.3: the fork does *not* improve solve time, and its effect on
+solution quality is not statistically significant at n=20.**
+
+### 6.0 Three ways a patched wheel can silently behave like stock
+
+All three were hit during this work. Each produced a wheel that imported without error and
+quietly did nothing, so they are recorded here as the failure modes to test for rather than
+reason about.
+
+1. **The enum is not exported to Python.** `cp_model.py` re-exports each value by hand, so adding
+   it to the proto is not enough. Symptom: `getattr(cp_model, "CHOOSE_MIN_UNFIXED_IN_GROUP")`
+   returns `None`; the project's fork detection falls back to stock.
+2. **The validator rejects it.** `ValidateSearchStrategies()` whitelists strategies by value.
+   Symptom: `MODEL_INVALID`, *"Unknown or unsupported variable_selection_strategy: 5"*.
+3. **The tags never reach the solver.** `SatParameters.ignore_names` defaults to **true**, and
+   `ModelCopy::ImportVariablesAndMaybeIgnoreNames()` discards every variable name. Measured on a
+   tagged instance: **96 `@G=` names in the user model, 0 in the presolved model.** Symptom: none
+   at all — the solver returns correct, optimal answers that are indistinguishable from stock.
+
+The third is the dangerous one: it has no error, and a benchmark run against it would have
+produced a full set of plausible "fork" numbers that were really stock numbers. Testing that the
+wheel *imports* cannot catch any of these; only solving can.
 
 ### 6.1 Measurement protocol
 
@@ -607,7 +634,64 @@ conclusion in either direction.
 **Scope the claim to what was measured.** One instance, one machine, one time budget. The honest
 sentence is "on the DJSCE CSE-DS reference instance", not "for university timetabling".
 
-### 6.3 What is fair to claim already
+### 6.3 Results
+
+**Setup.** DJSCE CSE-DS reference instance. 20 seeds per arm, 120 s limit, 100 solves total, run
+strictly sequentially on an idle 12-core machine (each solve uses `num_search_workers = 8`, so
+overlapping arms would corrupt the wall-clock numbers). Baseline is the **unpatched build of the
+same upstream commit** — not the pip wheel, which is 9.9.x against this tree's 9.15.x.
+
+| arm | | proofs | rate | Fisher *p* vs A | time-to-proof median [range] |
+|---|---|---:|---:|---:|---|
+| **A** | unpatched baseline | 15/20 | 75% | — | 61.5 s [37.5–107.1] |
+| **B** | fork, both features off | 14/20 | 70% | 1.000 | 70.0 s [32.9–115.7] |
+| **C** | static ordering (Tier-0) | 18/20 | 90% | 0.407 | 67.7 s [28.5–116.4] |
+| **D** | `division_day_lns` only | 16/20 | 80% | 1.000 | 65.5 s [31.0–118.1] |
+| **E** | both features | 19/20 | 95% | 0.182 | 67.2 s [38.1–121.2] |
+
+**The patch is inert when disabled.** A (75%) vs B (70%), *p* = 1.000, overlapping ranges. This is
+the control the rest of the table depends on, and it holds: the patched binary with both features
+off behaves like the unpatched build.
+
+**No arm is statistically significant.** E is the strongest at 95% vs 75%, but *p* = 0.182. At
+n = 20 that is not distinguishable from chance.
+
+**There is no speed-up.** Every arm's time-to-proof median falls between 61.5 s and 70.0 s with
+heavily overlapping ranges, and E's *mean* (75.2 s) is slower than A's (67.5 s). The fork does not
+make CP-SAT faster on this instance.
+
+**The Tier-0 ablation bites.** Arm C reaches 18/20, statistically indistinguishable from E's 19/20
+— and arm C requires **no source modification**: it sorts requirements by remaining candidates in
+Python and hands CP-SAT a plain `CHOOSE_FIRST` strategy, which runs on a stock wheel. Whatever
+benefit is visible here is therefore attributable to *variable ordering*, not to the C++ changes.
+Live re-ranking and the custom neighbourhood add one further proof in twenty on top of that.
+
+**Why the objective is not the headline metric.** Every arm that proves optimality finds the same
+optimum, **495.0** — the tags do not change the model, which is the design requirement and is now
+demonstrated rather than asserted. The post-hoc `score().soft_cost` is *not* what CP-SAT minimises:
+across 13 runs that all reached objective 495.0, it still spanned 109.2 to 130.9. Ranking arms by
+it ranks arbitrary tie-breaking among equally-optimal solutions, so proof rate and time-to-proof
+are used instead.
+
+**Why 5 seeds was not enough.** An earlier 5-seed run put every arm at 3/5 and gave arm B a
+time-to-proof median of 99.2 s. At 20 seeds the baseline is 61.5 s. The seed alone moves a single
+arm across a 2.9× range (37.5 s → 107.1 s) with nothing else changed, and that noise floor is
+larger than any effect being sought.
+
+**What it would take to settle it.** Separating 75% from 95% at *p* < 0.05 with 80% power needs
+roughly **46 seeds per arm** — about 2.3× the machine time spent here. The pair worth running is
+C against E, since that is what decides whether the source modification earns its place over
+stock-achievable ordering.
+
+Reproduce with:
+
+```bash
+.venv-baseline/Scripts/python -m research.fork_benchmark --arms A --seeds 20 --out research/base20.json
+.venv-fork/Scripts/python     -m research.fork_benchmark --arms B C D E --seeds 20 --out research/fork20.json
+.venv-fork/Scripts/python     -m research.fork_benchmark --compare research/base20.json research/fork20.json
+```
+
+### 6.4 What is fair to claim regardless of the result
 
 Independent of any timing result, the following are established and defensible:
 
@@ -616,12 +700,17 @@ Independent of any timing result, the following are established and defensible:
 - Neither is reachable through the public API, with the reason stated precisely: `NewBoolVar`
   gives every placement variable domain size 2, so `CHOOSE_MIN_DOMAIN_SIZE` cannot distinguish
   them, and no upstream neighbourhood generator can express a division-day fragment.
-- The design routes application structure through variable names, which survive presolve, so the
-  same model text is emitted to stock and forked solvers alike — making the comparison valid.
-- The patch is inert by construction on any model lacking the tags, and the code paths that
-  enable it are gated on their presence.
+- The design routes application structure through variable names, which reach the solver intact
+  once `ignore_names` is set to false (§1.1), so the same model text is emitted to stock and
+  forked solvers alike — making the comparison valid. Demonstrated, not assumed: every arm that
+  proved optimality found the identical optimum, 495.0.
+- The patch is inert when disabled. Measured, not merely argued: the patched binary with both
+  features off is statistically indistinguishable from the unpatched build of the same commit
+  (75% vs 70% proof rate, Fisher *p* = 1.000, overlapping ranges — §6.3). It is also inert by
+  construction on any model lacking the tags, since every code path is gated on their presence.
 
 These are claims about *design and engineering*, and they do not depend on the benchmark outcome.
+They remain true given §6.3's null performance result, and they are what this work establishes.
 
 The cheapest confirmation that a run is actually using the fork is that `division_day_lns` appears in
 CP-SAT's subsolver list in the solve log; on a stock build it is absent.

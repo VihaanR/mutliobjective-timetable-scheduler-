@@ -1,6 +1,6 @@
 # Pareto filter + AUGMECON2 epsilon-constraint upgrade — design
 
-**Date:** 2026-09-23 · **Status:** approved (design), pending implementation plan
+**Date:** 2026-09-23 · **Status:** implemented (benchmark pending)
 **Scope:** sub-project 1 of 4 from `docs/or_tools_source_modification_guide.md` follow-ups. Python
 only; no OR-Tools rebuild. The native C++ sweep (guide §4.4) is a later, separate spec, justified
 only if this work's benchmark shows per-point rebuild/presolve dominates sweep time.
@@ -77,22 +77,31 @@ sol, vals, status = session.solve_unbounded(minimize=..., fix={category: value},
   clears and re-adds solution hints, solves, decodes. No rebuild.
 - Payoff-table solves need the bound constraint inactive and a different objective; `ParetoSession`
   handles them by setting `eps`'s domain to its full `[0, UB]` range and swapping the objective.
-  If proto-level objective swapping proves fragile, fall back to a second built model for payoff
-  solves only (2 builds per pair instead of ~7) — decided during implementation, recorded in the
-  plan.
+  *(Implemented: proto-level domain and objective swapping works, so one model serves every
+  solve of a pair. Fixing a category for the lexicographic stage is a domain change on an
+  auxiliary `pareto_<category> == sum(terms)` variable, so no constraint is added after
+  construction.)*
 - Returns the CP-SAT status name alongside `(Solution, category_values)` so `optimal` can be set.
 - `solve_pareto_point()` and `_solve_and_decode()` keep their current contracts; shared decoding
   logic is reused, not duplicated.
 
 ### 3.4 Sweep algorithm (`sweep_pair` rewrite)
 
-1. **Lexicographic payoff table** (4 solves):
-   - `tight_end`: min `bound`; then min `minimize` s.t. `bound == tight_end` (the latter is the
-     frontier's tight-end point).
+1. **Lexicographic payoff table** (3 solves):
+   - `tight_end`: min `bound`. Its lexicographic second stage (min `minimize` s.t.
+     `bound == tight_end`) is *not* solved separately — it is exactly the grid's ε = `tight_end`
+     point, which the augmented sweep solve reaches anyway. *(Amended during implementation: the
+     original design solved it twice.)*
    - `loose_end`: min `minimize` → `m*`; then min `bound` s.t. `minimize == m*` → `loose_end`.
 2. Grid: `_epsilon_grid(tight_end, loose_end, n)` as today; step `Δ = (loose − tight)/(n − 1)`.
 3. Iterate ε from **loose to tight** (canonical AUGMECON2 order):
-   - Solve with hint = previous point's solution (first point: the greedy warm start).
+   - Hint every solve with a solution that already satisfies its bound: the previous point's
+     solution when its bound value is ≤ ε, otherwise the tight-end payoff solution (bound value
+     `tight_end`, feasible for every grid ε). `ParetoSession` completes that hint over every
+     model variable before solving. *(Amended after the first reference-instance benchmark: a
+     hint covering only placement variables is not an incumbent to CP-SAT, and solves near the
+     frontier's edge timed out empty — 0 frontier points on 2 of 3 pairs. With the completed
+     hint the same solve returned OPTIMAL.)*
    - **Infeasible (no solution)** → emit that point as infeasible and **stop**: every tighter ε is
      also infeasible. Only valid when the status is `INFEASIBLE` (proven); on `UNKNOWN`
      (time-limit, no solution) record the point and **continue**, since nothing was proven.

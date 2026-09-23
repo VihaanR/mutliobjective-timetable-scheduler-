@@ -311,3 +311,22 @@ def test_adjust_run_validates_day_and_status(client):
         s.add(TimetableRun(id=555, status="queued", solver="greedy", time_limit=3, problem_snapshot={}))
         s.commit()
     assert client.post("/api/runs/555/adjust", json={"day": 0}).status_code == 409            # not done
+
+
+def test_pareto_sweep_honours_requested_pairs(client, monkeypatch):
+    """POST /api/pareto validated `pairs` but the job always swept DEFAULT_PAIRS, so asking for
+    one pair silently cost three pairs' worth of solves. The sweep is stubbed: this is about what
+    the job asks for, not about solving."""
+    import webapp.jobs as jobs
+    seen = {}
+
+    def fake_sweep(problem, pairs=None, time_limit_s=0, sweep_points=0):
+        seen["pairs"] = pairs
+        return {}
+
+    monkeypatch.setattr(jobs, "run_pareto_sweep_fn", fake_sweep)
+    _seed(client)
+    r = client.post("/api/pareto", json={"pairs": [["faculty", "labs"]], "time_limit_s": 1})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/pareto/{r.json()['run_id']}").json()["status"] == "done"
+    assert seen["pairs"] == [("faculty", "labs")]

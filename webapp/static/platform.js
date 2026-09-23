@@ -853,17 +853,22 @@ function renderParetoResults(points) {
       wrap.appendChild(section);
       return;
     }
-    const feasible = rows.filter((r) => r.hard_violations === 0);
+    // Runs stored before the dominance filter existed lack these flags; treat those points as
+    // optimal, non-dominated and actually solved, which is what the old sweep implicitly claimed.
+    const feasible = rows.filter((r) => r.hard_violations === 0 && r.bound_value != null);
     const table = document.createElement("table");
     table.className = "tt history-table";
     table.innerHTML =
       `<thead><tr><th>${rows[0].bound_category} (bounded)</th><th>${rows[0].minimize_category} (minimized)</th>` +
-      `<th>hard violations</th><th>wall (s)</th></tr></thead>`;
+      `<th>hard violations</th><th>optimal</th><th>on frontier</th><th>wall (s)</th></tr></thead>`;
     const tbody = document.createElement("tbody");
     rows.forEach((r) => {
       const tr = document.createElement("tr");
+      const wall = r.skipped_by_bypass ? "skipped (bypass)" : r.wall_s.toFixed(1);
       tr.innerHTML = `<td>${r.bound_value ?? "—"}</td><td>${r.minimize_value ?? "—"}</td>` +
-        `<td>${r.hard_violations}</td><td>${r.wall_s.toFixed(1)}</td>`;
+        `<td>${r.hard_violations}</td><td>${r.optimal === false ? "no (time limit)" : "yes"}</td>` +
+        `<td>${r.dominated ? "dominated" : "yes"}</td><td>${wall}</td>`;
+      if (r.dominated) tr.style.opacity = "0.55";
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -881,8 +886,10 @@ function renderParetoResults(points) {
   wrap.style.display = "";
 }
 
-// Minimal inline-SVG scatter of the feasible (hard=0) frontier points for one pair — no chart
-// library, matching this page's "vanilla JS, no build step" convention.
+// Minimal inline-SVG scatter of the feasible (hard=0) points for one pair — no chart library,
+// matching this page's "vanilla JS, no build step" convention. Non-dominated points are solid and
+// joined by the frontier line; dominated ones are hollow and grey, shown but never joined.
+// Bypassed points duplicate a solved one, so they are not drawn a second time.
 function buildParetoScatter(points) {
   const W = 420, H = 220, PAD = 36;
   const xs = points.map((p) => p.bound_value);
@@ -893,9 +900,12 @@ function buildParetoScatter(points) {
   const sy = (v) => H - PAD - (yMax === yMin ? 0 : ((v - yMin) / (yMax - yMin)) * (H - 2 * PAD));
 
   const dots = points
-    .map((p) => `<circle cx="${sx(p.bound_value)}" cy="${sy(p.minimize_value)}" r="4" fill="var(--accent-2, #f26d21)" />`)
+    .filter((p) => !p.skipped_by_bypass)
+    .map((p) => p.dominated
+      ? `<circle cx="${sx(p.bound_value)}" cy="${sy(p.minimize_value)}" r="4" fill="none" stroke="var(--muted, #999)" stroke-width="1.5"><title>dominated</title></circle>`
+      : `<circle cx="${sx(p.bound_value)}" cy="${sy(p.minimize_value)}" r="4" fill="var(--accent-2, #f26d21)" />`)
     .join("");
-  const sorted = [...points].sort((a, b) => a.bound_value - b.bound_value);
+  const sorted = points.filter((p) => !p.dominated).sort((a, b) => a.bound_value - b.bound_value);
   const line = sorted.map((p) => `${sx(p.bound_value)},${sy(p.minimize_value)}`).join(" ");
 
   const svg = document.createElement("div");

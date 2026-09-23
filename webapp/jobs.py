@@ -92,7 +92,7 @@ def run_generation(run_id: int) -> None:
             session.commit()
 
 
-def run_pareto_job(run_id: int, problem_snapshot: dict) -> None:
+def run_pareto_job(run_id: int, problem_snapshot: dict, pairs: list[list[str]] | None = None) -> None:
     """Background worker for a Pareto sweep (POST /api/pareto). Takes the problem snapshot
     directly (built synchronously by the router before queuing, same pattern as run_generation's
     problem_snapshot on TimetableRun) rather than re-deriving it from branch_ids here, so the
@@ -109,7 +109,8 @@ def run_pareto_job(run_id: int, problem_snapshot: dict) -> None:
         try:
             problem = problem_from_dict(problem_snapshot)
             results = run_pareto_sweep_fn(
-                problem, time_limit_s=run.time_limit_s, sweep_points=run.sweep_points)
+                problem, pairs=[tuple(p) for p in pairs] if pairs else None,
+                time_limit_s=run.time_limit_s, sweep_points=run.sweep_points)
             run.points = {pair: [asdict(p) for p in points] for pair, points in results.items()}
             run.status = "done"
             session.add(run)

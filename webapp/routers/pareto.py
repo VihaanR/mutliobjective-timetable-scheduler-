@@ -61,7 +61,7 @@ def start_pareto_sweep(
     session.commit()
     session.refresh(run)
 
-    background.add_task(run_pareto_job, run.id, problem_to_dict(problem))
+    background.add_task(run_pareto_job, run.id, problem_to_dict(problem), [list(p) for p in pairs])
     return {"run_id": run.id}
 
 

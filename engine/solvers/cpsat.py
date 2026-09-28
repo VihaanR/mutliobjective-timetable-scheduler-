@@ -711,7 +711,7 @@ class ParetoSession:
 
     def _set_domain(self, var: cp_model.IntVar, lo: int, hi: int) -> None:
         domain = self._built.model.Proto().variables[var.Index()].domain
-        domain.clear()  # the pybind proto's repeated field has no __delitem__
+        del domain[:]  # clear the repeated field (RepeatedScalarContainer has no .clear())
         domain.extend([int(lo), int(hi)])
 
     def _reset(self) -> None:

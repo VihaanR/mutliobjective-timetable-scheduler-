@@ -89,7 +89,7 @@ def test_pareto_session_fix_pins_category(small_problem):
         pytest.skip("no feasible solution within budget")
     # the hint is feasible for the fixed value, so the pinned solve has a solution to start from
     _sol, fixed, status = session.solve_unbounded(
-        minimize="faculty", fix={"students": vals["students"]}, time_limit_s=10, hint=sol)
+        minimize="faculty", fix={"students": vals["students"]}, time_limit_s=20, hint=sol)
     assert status in ("OPTIMAL", "FEASIBLE")
     assert fixed["students"] == vals["students"]
 

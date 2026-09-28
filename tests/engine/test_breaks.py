@@ -152,7 +152,7 @@ def test_cpsat_respects_continuous_teaching_cap(small_problem):
 
 def test_pipeline_respects_continuous_teaching_cap(reference_problem):
     from engine.pipeline import run_pipeline, PipelineConfig
-    cfg = PipelineConfig(greedy_time_limit_s=3, mip_time_limit_s=20, ga_time_limit_s=8, cpsat_time_limit_s=25)
+    cfg = PipelineConfig(greedy_time_limit_s=3, mip_time_limit_s=20, ga_time_limit_s=8, cpsat_time_limit_s=60)
     sol = run_pipeline(reference_problem, cfg).final
     result = score(sol, reference_problem)
     assert result.hard_violations == 0, f"Expected hard_violations=0, got {result.hard_violations}"

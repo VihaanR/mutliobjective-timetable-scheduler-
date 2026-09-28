@@ -1,0 +1,673 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{array}
+\usepackage{tabularx}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{NEP-Aligned Multi-Objective Timetable Scheduling and Optimization}
+
+\author{
+\IEEEauthorblockN{[Author 1], [Author 2], [Author 3]}
+\IEEEauthorblockA{
+\textit{Department of Computer Engineering} \\
+\textit{DJ Sanghvi College of Engineering, University of Mumbai}\\
+Mumbai, Maharashtra, India \\
+\{[rollno1], [rollno2], [rollno3]\}@djsce.ac.in}
+}
+
+\maketitle
+
+% ------------------------------------------------------------------ Abstract
+\begin{abstract}
+University course timetabling is a highly constrained, multi-objective
+combinatorial problem that balances competing preferences of faculty, students,
+and resource managers. We present a multi-objective scheduling platform for
+DJ~Sanghvi College of Engineering (DJSCE) built on a \emph{source-modified}
+build of the Google OR-Tools CP-SAT solver. Rather than configuring CP-SAT
+through its public API, we extend its C++ internals to inject two
+scheduling-specific capabilities: (i)~a Large Neighbourhood Search (LNS)
+generator, \texttt{division\_day\_lns}, that relaxes entire
+\emph{division-days} at a time, and (ii)~a dynamic branching strategy,
+\texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP}, that re-ranks courses by their
+remaining candidate placements at every search node. Both features are wired
+to domain knowledge encoded in variable names, requiring no change to the
+model's constraint set and remaining inert on stock OR-Tools builds. We
+generate a 3-axis Pareto front across faculty, student, and resource objectives
+using the AUGMECON2 epsilon-constraint method. A rigorous five-arm ablation
+study (20~seeds, 120\,s per arm, $n{=}100$ solves) shows the patched binary is
+statistically indistinguishable from the unpatched baseline when its features
+are disabled ($p{=}1.000$), and the full fork reaches a 95\,\% proof rate
+versus 75\,\% for stock CP-SAT, though this difference is not significant at
+$p{<}0.05$ ($p{=}0.182$). We show that \emph{most} of the observable benefit
+derives from a Tier-0 static variable-ordering step achievable without any
+source modification, and we discuss the implications of this null result for
+future domain-specific solver development.
+\end{abstract}
+
+\begin{IEEEkeywords}
+University Timetabling, Constraint Programming, CP-SAT, OR-Tools, Large
+Neighbourhood Search, Multi-Objective Optimisation, Pareto Front,
+Epsilon-Constraint, Variable Ordering, NEP
+\end{IEEEkeywords}
+
+% ---------------------------------------------------------------- Introduction
+\section{Introduction}\label{sec:intro}
+
+The University Course Timetabling Problem (UCTP) is a well-known
+NP-hard combinatorial optimisation problem~\cite{Even1975}. Given a set of
+courses, faculty members, student divisions, timeslots, and rooms, the task is
+to produce a weekly schedule that satisfies all hard constraints---no
+double-booking of rooms or faculty, every course assigned exactly its required
+hours---while minimising soft-cost objectives such as idle gaps, uneven workload
+distribution, and poor room utilisation.
+
+India's National Education Policy (NEP) 2020 further compounds scheduling
+complexity by mandating flexible credit frameworks, interdisciplinary course
+offerings, and multiple entry-exit pathways. Under NEP, a single student
+cohort may simultaneously attend courses from different departments and
+semesters, making the division-level independence assumption that underlies
+most classical UCTP formulations untenable. Our platform is designed from the
+ground up to accommodate NEP's credit-hour diversity and cross-divisional
+elective structures.
+
+Modern solvers like IBM CPLEX~\cite{cplex}, Gurobi~\cite{gurobi}, and Google
+OR-Tools CP-SAT~\cite{ortools} have dramatically advanced the feasibility of
+exact approaches. CP-SAT in particular combines a SAT-based proof engine with
+a Large Neighbourhood Search (LNS) portfolio, making it competitive with
+metaheuristics on many scheduling benchmarks. However, \emph{generic} CP-SAT
+models are \emph{structurally blind}: the solver's internal \texttt{CpModelProto}
+is a flat list of variables and constraints with no notion of which variables
+belong to the same ``group''. For timetabling this matters because nearly every
+soft-cost term---idle gaps, day span, break placement---is evaluated
+\emph{within} a single division's day. An LNS fragment that cuts across
+division boundaries fixes the variables that define each gap and prevents the
+sub-solver from improving them.
+
+We address this limitation through a minimal, surgical patch to OR-Tools'
+C++ internals (9~files, 245~insertions, 2~modified lines, 0~deletions) that
+communicates group membership from the model builder to the solver via
+variable-name tags. The same model text is emitted unchanged; the tags are
+simply ignored on an unmodified build.
+
+Our contributions are:
+\begin{itemize}
+  \item A zero-overhead mechanism for conveying hierarchical domain structure
+        to CP-SAT via variable-name tags (\S\ref{sec:tags}).
+  \item \texttt{DivisionDayNeighborhoodGenerator}: an LNS generator that
+        relaxes complete division-days (\S\ref{sec:lns}).
+  \item \texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP}: a dynamic MRV branching rule
+        that re-ranks courses live during search (\S\ref{sec:mrv}).
+  \item A 3-axis Pareto-front engine using the AUGMECON2
+        epsilon-constraint method (\S\ref{sec:pareto}).
+  \item A five-arm ablation study whose \emph{null result} clarifies the
+        relative value of source-level vs.\ API-level solver specialisation
+        (\S\ref{sec:results}).
+  \item A description of the source code changes, covering all 9 modified
+        files, 245 insertions, and the variable-name tag format
+        (\S\ref{sec:implementation}).
+\end{itemize}
+
+% ------------------------------------------------------------ Related Work
+\section{Related Work}\label{sec:related}
+
+\paragraph{University Timetabling.}
+The UCTP has been studied extensively since the 1960s. Early exact approaches
+used integer programming~\cite{Schaerf1999}, while later work demonstrated the
+practical effectiveness of local search, simulated annealing, and evolutionary
+methods~\cite{Burke2002}. The ITC series of international timetabling
+competitions~\cite{ITC2007,ITC2019} established benchmark instances and
+evaluation criteria that the community continues to use. Recent work has
+moved toward modelling timetabling as a multi-objective problem, with Pareto
+front enumeration used to expose the trade-off between faculty and student
+preferences~\cite{Pillay2018}.
+
+\paragraph{Constraint Programming for Scheduling.}
+CP has long been applied to scheduling via global constraints such as
+\texttt{cumulative} and \texttt{no-overlap}~\cite{Baptiste2001}. The
+introduction of SAT-based techniques---nogood recording, VSIDS branching, and
+clause learning---dramatically improved CP's ability to prove
+infeasibility~\cite{Ohrimenko2009}. OR-Tools CP-SAT fuses these with a
+parallel LNS portfolio and is now state-of-the-art on several scheduling
+benchmarks~\cite{ortools,Perron2023}.
+
+\paragraph{Large Neighbourhood Search.}
+LNS was introduced by Shaw~\cite{Shaw1998} and formalised as a destroy-and-repair
+metaheuristic. The key insight is that the quality of an LNS neighbourhood
+depends critically on which variables are relaxed. Domain-specific
+neighbourhoods---relaxing a single vehicle's route, a single machine's
+jobs---consistently outperform random relaxation on structured
+instances~\cite{Pisinger2010}. Our work applies this principle inside CP-SAT's
+C++ LNS subsystem rather than at the Python modelling layer, extending the line
+of research on solver-integrated neighbourhoods~\cite{Chu2012}.
+
+\paragraph{Dynamic Variable Ordering.}
+The Minimum Remaining Values (MRV) heuristic is a cornerstone of
+backtracking search for CSPs~\cite{Haralick1980}. In CP-SAT, placement
+variables are Boolean, so every unassigned variable has domain size~2 and MRV
+degenerates to first-fail. Our \texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP}
+strategy lifts MRV to the course level, restoring its discriminating power in
+the Boolean encoding.
+
+% ----------------------------------------------------------- Methodology
+\section{Methodology}\label{sec:method}
+
+\subsection{Notation}\label{sec:notation}
+
+Table~\ref{tab:notation} summarises all symbols used throughout this paper.
+
+\begin{table}[htbp]
+\centering
+\caption{Notation}
+\label{tab:notation}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{>{\ttfamily}lp{5.5cm}}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} \\
+\midrule
+$\mathcal{D}$ & Set of student divisions \\
+$\mathcal{C}$ & Set of courses (sessions) \\
+$\mathcal{F}$ & Set of faculty members \\
+$\mathcal{T}$ & Set of timeslots \\
+$\mathcal{R}$ & Set of rooms \\
+$\mathcal{G}$ & Set of division-day groups; $|\mathcal{G}|=15$ in the reference instance \\
+$d_c$         & Duration of course $c$ in timeslots \\
+$x_{c,t,r}$  & Binary placement variable; 1 iff course $c$ starts at slot $t$ in room $r$ \\
+$L_{\max}$   & Maximum consecutive non-break teaching hours per day (4) \\
+$w^f_k$       & Weight of the $k$-th faculty penalty term \\
+$w^s_k$       & Weight of the $k$-th student penalty term \\
+$w^r_k$       & Weight of the $k$-th resource penalty term \\
+$f^f_k(x)$    & $k$-th faculty penalty function evaluated on assignment $x$ \\
+$f^s_k(x)$    & $k$-th student penalty function evaluated on assignment $x$ \\
+$f^r_k(x)$    & $k$-th resource penalty function evaluated on assignment $x$ \\
+$Z_f(x)$      & Total faculty objective score \\
+$Z_s(x)$      & Total student objective score \\
+$Z_r(x)$      & Total resource objective score \\
+$\varepsilon_f, \varepsilon_s, \varepsilon_r$ & Epsilon bounds for the two constrained objectives in AUGMECON2 \\
+$\delta$      & LNS difficulty parameter, $\delta \in [0,1]$ \\
+$n_g(x)$      & Number of unfixed placement variables in requirement group $g$ at search node $x$ \\
+$\texttt{@R=}$& Variable-name tag for requirement (course) group identity \\
+$\texttt{@G=}$& Variable-name tag for division-day group identity \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Problem Formulation}\label{sec:formulation}
+
+Let $\mathcal{D}$ be the set of student divisions, $\mathcal{C}$ the set of
+courses, $\mathcal{F}$ the faculty, $\mathcal{T}$ the timeslots, and
+$\mathcal{R}$ the rooms. Each course $c \in \mathcal{C}$ has a duration
+$d_c$ in slots, a set of eligible rooms $\mathcal{R}_c \subseteq \mathcal{R}$,
+and a set of eligible timeslots $\mathcal{T}_c \subseteq \mathcal{T}$ per day.
+A placement variable $x_{c,t,r} \in \{0,1\}$ equals 1 if and only if course
+$c$ is assigned to start at slot $t$ in room $r$.
+
+\subsubsection{Hard Constraints}
+
+\begin{enumerate}
+  \item \textbf{Coverage}: every course is scheduled exactly once,
+        \begin{equation}
+          \sum_{t \in \mathcal{T}_c}\sum_{r \in \mathcal{R}_c} x_{c,t,r} = 1
+          \quad \forall c \in \mathcal{C}.
+          \label{eq:coverage}
+        \end{equation}
+  \item \textbf{No room conflict}: a room hosts at most one course at any slot,
+        \begin{equation}
+          \sum_{c \,:\, t' \in [t, t{+}d_c)} x_{c,t,r} \le 1
+          \quad \forall r \in \mathcal{R},\; t' \in \mathcal{T}.
+          \label{eq:room}
+        \end{equation}
+  \item \textbf{No faculty conflict}: a faculty member teaches at most one
+        course at any slot. Let $\mathcal{C}_f \subseteq \mathcal{C}$ be the
+        courses assigned to faculty member $f$:
+        \begin{equation}
+          \sum_{c \in \mathcal{C}_f}\sum_{r \in \mathcal{R}_c}
+            \sum_{t \,:\, t' \in [t, t{+}d_c)} x_{c,t,r} \le 1
+          \quad \forall f \in \mathcal{F},\; t' \in \mathcal{T}.
+          \label{eq:faculty}
+        \end{equation}
+  \item \textbf{No division conflict}: no division attends two courses
+        simultaneously (analogous to~\eqref{eq:faculty} with
+        $\mathcal{C}_d$ for division $d$).
+  \item \textbf{Consecutive-hour limit}: no division has more than
+        $L_{\max}=4$ consecutive non-break teaching slots per day.
+\end{enumerate}
+
+\subsubsection{Soft Objectives}\label{sec:objectives}
+
+Three aggregated penalty scores form the multi-objective vector
+$(Z_f, Z_s, Z_r)$:
+
+\begin{equation}
+  Z_f(x) = \sum_{k} w^f_k \, f^f_k(x)
+  \label{eq:zf}
+\end{equation}
+\begin{equation}
+  Z_s(x) = \sum_{k} w^s_k \, f^s_k(x)
+  \label{eq:zs}
+\end{equation}
+\begin{equation}
+  Z_r(x) = \sum_{k} w^r_k \, f^r_k(x)
+  \label{eq:zr}
+\end{equation}
+
+where the penalty functions include:
+\begin{itemize}
+  \item \textbf{Faculty penalties} ($f^f_k$): workload spread across days,
+        consecutive-session counts, and violations of stated day-off
+        preferences.
+  \item \textbf{Student penalties} ($f^s_k$): idle gaps within a division's
+        daily schedule and the total day span (first session to last session).
+  \item \textbf{Resource penalties} ($f^r_k$): excess room-capacity waste
+        (allocated seats minus enrolled students, summed over all sessions)
+        and deviations from the preferred lab-distribution pattern.
+\end{itemize}
+
+The full multi-objective optimisation problem is
+\begin{equation}
+  \min_{x \in \mathcal{X}}\; \bigl(Z_f(x),\; Z_s(x),\; Z_r(x)\bigr)
+  \label{eq:moo}
+\end{equation}
+where $\mathcal{X}$ denotes the feasible region defined by
+constraints~\eqref{eq:coverage}--\eqref{eq:faculty} and the division-conflict
+and consecutive-hour-limit constraints.
+
+\subsubsection{Instance Statistics}
+The DJSCE CSE-DS reference instance has 114~sessions, 3~divisions,
+5~days, 8~slots/day, giving $|\mathcal{D}|\times|\mathcal{T}|=15$
+division-days; the model emits 4,558~placement variables, of which 4,250
+carry group tags.
+
+\subsection{Variable-Name Tags}\label{sec:tags}
+A \texttt{CpModelProto} has no field for group membership. We embed
+it in each placement variable's name using the format
+\begin{center}
+  \texttt{x\_<req>\_<slot>\_<room>@R=<req\_id>@G=<div>\#<day>}
+\end{center}
+The \texttt{@R=} tag identifies the requirement group (course) and \texttt{@G=}
+the division-day group.
+
+The parser (\texttt{ExtractDomainTag} / \texttt{GroupVariablesByDomainTag}
+in \texttt{cp\_model\_utils.cc}) operates on \texttt{absl::string\_view}
+slices into the proto's own string storage, allocating no heap memory. Groups
+are returned in \emph{first-seen} order---not hash order---ensuring
+reproducibility across runs with a fixed seed.
+
+CP-SAT's \texttt{ignore\_names} parameter defaults to \texttt{true} and
+strips all variable names before presolve. Setting it to \texttt{false}
+preserves the tags; the flag is set automatically whenever tags are enabled.
+A stock build that receives a tagged model simply ignores the tags and solves
+as normal.
+
+\subsection{Division-Day LNS Generator}\label{sec:lns}
+The built-in LNS generators~\cite{Perron2023} choose fragments randomly or
+via constraint-graph walks. Both are oblivious to division-day structure.
+We register \texttt{DivisionDayNeighborhoodGenerator} alongside the existing
+generators; it is automatically disabled (via \texttt{ReadyToGenerate()}) if
+no \texttt{@G=} tags are found, so unrelated models pay no cost.
+
+Given solver-managed difficulty $\delta \in [0,1]$, the generator unfreezes
+$\max\!\bigl(1,\, \lceil\delta \cdot |\mathcal{G}|\rceil\bigr)$ whole
+division-days chosen by a partial Fisher--Yates shuffle over the group index,
+where $|\mathcal{G}|=15$. Auxiliary variables (gap indicators, workload
+counters) carry no \texttt{@G=} tag and are collected into
+\texttt{always\_relaxed\_} at construction time; they must be unfrozen with
+every neighbourhood or propagation re-derives them instantly and the sub-solver
+cannot change anything.
+
+\subsection{Dynamic MRV Branching}\label{sec:mrv}
+
+We add \texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP} (value~5) to the
+\texttt{DecisionStrategyProto::VariableSelectionStrategy} enum. At each
+search node the strategy computes, for every requirement group $g$, the count
+of unfixed placement variables:
+\begin{equation}
+  n_g(x) = \bigl|\{\,x_{c,t,r} \mid c \in g,\; x_{c,t,r} \text{ unfixed}\}\bigr|.
+  \label{eq:mrv_count}
+\end{equation}
+Each placement variable $x_{c,t,r}$ in group $g$ is assigned priority
+$n_g(x)$; the variable with the smallest priority is selected next.
+Untagged variables receive priority $\mathtt{INT64\_MAX}{-}1$ so they sort
+last but remain selectable.
+
+The branching procedure is summarised in Algorithm~\ref{alg:mrv}.
+
+\begin{algorithm}[htbp]
+\caption{\texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP} branching}
+\label{alg:mrv}
+\begin{algorithmic}[1]
+\REQUIRE Current partial assignment $x$, requirement groups
+         $\{g_1, \ldots, g_m\}$
+\ENSURE  Next variable to branch on
+\STATE Initialise count array $n[1..m] \leftarrow 0$
+\FOR{each unfixed placement variable $x_{c,t,r}$}
+  \STATE $g \leftarrow$ requirement group of $c$
+  \STATE $n[g] \leftarrow n[g] + 1$
+\ENDFOR
+\FOR{each unfixed placement variable $x_{c,t,r}$}
+  \STATE $\text{priority}(x_{c,t,r}) \leftarrow
+         \begin{cases} n[g] & \text{if } c \text{ has tag } \texttt{@R=}g \\ \mathtt{INT64\_MAX}{-}1 & \text{otherwise} \end{cases}$
+\ENDFOR
+\RETURN $\arg\min_{x_{c,t,r} \text{ unfixed}} \text{priority}(x_{c,t,r})$
+\end{algorithmic}
+\end{algorithm}
+
+The per-node count vector reuses its allocation from the previous node
+(\texttt{std::vector::assign()}), so there is no heap allocation after the
+root node.
+
+Three C++ sites must all agree for the enum to function: the proto definition,
+the model validator (\texttt{cp\_model\_checker.cc}), and the Python
+re-export in \texttt{cp\_model.py}. Missing any one produces a silent
+fall-back to stock behaviour.
+
+\subsection{Pareto-Front Generation via Epsilon-Constraint}\label{sec:pareto}
+
+We define three soft-objective categories:
+\begin{itemize}
+  \item \textbf{Faculty}: workload spread, consecutive-session avoidance,
+        day-off preferences ($Z_f$, Eq.~\eqref{eq:zf}).
+  \item \textbf{Students}: minimisation of idle gaps and day span per
+        division ($Z_s$, Eq.~\eqref{eq:zs}).
+  \item \textbf{Resource}: room-capacity waste and lab-distribution pattern
+        ($Z_r$, Eq.~\eqref{eq:zr}).
+\end{itemize}
+
+\subsubsection{AUGMECON2 Epsilon-Constraint Formulation}
+
+The AUGMECON2 method~\cite{Mavrotas2009} converts the vector
+problem~\eqref{eq:moo} into a sequence of single-objective problems. In each
+iteration, one objective is minimised while the remaining objectives are
+bounded by epsilon parameters. Selecting $Z_f$ as the primary objective, the
+subproblem is:
+\begin{equation}
+\begin{aligned}
+  \min_{x \in \mathcal{X}} \quad & Z_f(x) + \mu\!\left(\frac{s_s}{r_s} + \frac{s_r}{r_r}\right) \\
+  \text{subject to} \quad
+  & Z_s(x) + s_s = \varepsilon_s, \quad s_s \ge 0 \\
+  & Z_r(x) + s_r = \varepsilon_r, \quad s_r \ge 0
+\end{aligned}
+\label{eq:augmecon2}
+\end{equation}
+where $\mu = 10^{-3}$ is a small regularisation weight that breaks ties in
+favour of solutions that also minimise the constrained objectives, $r_s$ and
+$r_r$ are the ranges of $Z_s$ and $Z_r$ over the payoff table, and $s_s$,
+$s_r$ are non-negative slack variables. The epsilon grid is swept over
+$\varepsilon_s \in [Z_s^{\min}, Z_s^{\max}]$ and
+$\varepsilon_r \in [Z_r^{\min}, Z_r^{\max}]$ in uniform steps; solving
+one instance of~\eqref{eq:augmecon2} per grid point yields a set of
+non-dominated solutions whose projection onto the three-dimensional objective
+space is the Pareto front.
+
+The \texttt{ParetoSession} class builds a single CP-SAT model augmented with
+three integer variables (one per category) that accumulate each category's
+weighted penalty. A feasible warm-start hint is \emph{completed} into a
+full-variable hint (fixing placements and solving for auxiliaries in
+$\le 5$\,s) before each bounded solve; without this step, hints covering only
+placement variables fail to act as incumbents and bounded solves frequently
+time out at the frontier edge.
+
+% ------------------------------------------------- Source Code Changes
+\section{Source Code Changes}\label{sec:implementation}
+
+The fork diverges from upstream OR-Tools at commit \texttt{98c165af} via a
+single self-contained patch. Table~\ref{tab:files} lists all 9 modified files;
+the patch adds 245 lines and modifies 2 existing lines (net deletions: 0).
+Every addition is guarded by the presence of \texttt{@R=} or \texttt{@G=}
+tags, so the changes are entirely inert on any model that does not use the tag
+format.
+
+\begin{table*}[t]
+\centering
+\caption{Source Files Changed in the OR-Tools Fork}
+\label{tab:files}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabularx}{\textwidth}{l r r X}
+\toprule
+\textbf{File} & \textbf{+} & \textbf{\texttildelow} & \textbf{Purpose} \\
+\midrule
+\texttt{ortools/sat/cp\_model.proto}           & 3  & 0 & Adds \texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP} (value~5) to the \texttt{VariableSelectionStrategy} enum \\
+\texttt{ortools/sat/cp\_model\_utils.h}        & 8  & 0 & Declares \texttt{ExtractDomainTag} and \texttt{GroupVariablesByDomainTag} \\
+\texttt{ortools/sat/cp\_model\_utils.cc}       & 52 & 0 & Implements the two tag-parsing functions using zero-copy \texttt{absl::string\_view} slices \\
+\texttt{ortools/sat/cp\_model\_checker.cc}     & 4  & 2 & Whitelists enum value~5 in the model validator so it does not reject tagged models \\
+\texttt{ortools/sat/linear\_programming\_constraint.h} & 2 & 0 & Exposes group-index accessor for LP heuristics \\
+\texttt{ortools/sat/constraint\_violation.cc}  & 18 & 0 & Augments the LNS feasibility check to respect division-day group boundaries \\
+\texttt{ortools/sat/neighbors.h}               & 12 & 0 & Declares \texttt{DivisionDayNeighborhoodGenerator} \\
+\texttt{ortools/sat/neighbors.cc}              & 128& 0 & Full implementation of \texttt{DivisionDayNeighborhoodGenerator} and \texttt{CHOOSE\_MIN\_UNFIXED\_IN\_GROUP} branching logic \\
+\texttt{python/ortools/sat/cp\_model.py}       & 18 & 0 & Re-exports the new enum constant so Python model builders can reference it \\
+\midrule
+\textbf{Total}                                 & \textbf{245} & \textbf{2} & \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\subsubsection{Variable-Name Tag Format}
+
+The tag format is the sole communication channel between the Python model
+builder and the C++ solver internals. Every placement variable is named
+\begin{center}
+  \texttt{x\_<req>\_<slot>\_<room>@R=<req\_id>\allowbreak @G=<div>\#<day>}
+\end{center}
+where:
+\begin{itemize}
+  \item \texttt{<req>}, \texttt{<slot>}, \texttt{<room>} are human-readable
+        identifiers for the course requirement, timeslot, and room respectively.
+  \item \texttt{@R=<req\_id>} is the \emph{requirement tag}: an integer key
+        that groups all placement variables belonging to the same course
+        requirement. The MRV branching rule counts unfixed variables per
+        \texttt{@R=} group.
+  \item \texttt{@G=<div>\#<day>} is the \emph{division-day tag}: a composite
+        key formed from the division identifier and the day index, separated by
+        \texttt{\#}. The LNS generator relaxes all variables sharing the same
+        \texttt{@G=} value together.
+\end{itemize}
+
+Non-placement variables (gap indicators, workload counters, room-waste
+accumulators) carry neither tag. The parser treats the absence of a tag as
+assignment to a default ``untagged'' group, which the LNS generator always
+relaxes and the MRV rule deprioritises via the $\mathtt{INT64\_MAX}{-}1$
+sentinel priority.
+
+\subsubsection{Backward Compatibility}
+
+The tag strings are legal UTF-8 variable names in the \texttt{CpModelProto}
+format. An unmodified OR-Tools build ignores them entirely and solves the
+model as if the names were arbitrary labels---which is exactly the existing
+behaviour when \texttt{ignore\_names=True}. Setting \texttt{ignore\_names=False}
+on an unmodified build preserves the names but does not activate any tag-aware
+logic, so the model solves correctly with no performance regression.
+
+% ----------------------------------------------------------- Experiments
+\section{Experimental Results}\label{sec:results}
+
+\subsection{Setup}
+All experiments used the DJSCE CSE-DS reference instance
+(114~sessions, 3~divisions). Each arm ran 20~independent seeds at
+\texttt{num\_search\_workers=8} with a 120\,s wall-clock limit, sequentially
+on an idle 12-core machine, giving 100~solves total. The baseline (Arm~A) is
+an \emph{unpatched} build of the same upstream commit
+(\texttt{98c165af})---not the pip wheel, which tracks a different branch.
+
+\begin{table*}[t]
+\centering
+\caption{Five-Arm Ablation Study (20~Seeds, 120\,s Limit)}
+\label{tab:ablation}
+\begin{tabular}{clrrl}
+\toprule
+\textbf{Arm} & \textbf{Configuration} & \textbf{Rate} & \textbf{Med.\ time} & \textbf{Fisher $p$ vs A} \\
+\midrule
+A & Stock baseline              & 75\,\% & 61.5\,s & ---   \\
+B & Fork, both features off     & 70\,\% & 70.0\,s & 1.000 \\
+C & Static ordering (Tier-0)    & 90\,\% & 67.7\,s & 0.407 \\
+D & \texttt{div\_day\_lns} only & 80\,\% & 65.5\,s & 1.000 \\
+E & Both features               & 95\,\% & 67.2\,s & 0.182 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Discussion}
+\textbf{Arm~B validates the control.} The patched binary with both features
+disabled is statistically indistinguishable from the unpatched build
+($p{=}1.000$, overlapping ranges), confirming that the patch is inert when
+not activated. This is the precondition that makes the rest of the table
+meaningful.
+
+\textbf{No arm is statistically significant at $p{<}0.05$.} Arm~E achieves
+the highest proof rate (95\,\%) but the Fisher exact test gives $p{=}0.182$
+at $n{=}20$. Separating 75\,\% from 95\,\% at $p{<}0.05$ with 80\,\% power
+requires approximately 46~seeds per arm.
+
+\textbf{Variable ordering (Arm~C) explains most of the signal.} Arm~C
+sorts requirements by their number of feasible placements in Python
+\emph{before} the solve, then hands CP-SAT a plain
+\texttt{CHOOSE\_FIRST} strategy on a stock wheel---no source modification
+required. It reaches 90\,\%, only one proof behind Arm~E. The fork's
+distinctive contribution---live re-ranking and the custom neighbourhood---adds
+one further proof in twenty on top of a Python-achievable baseline.
+
+\textbf{Time-to-proof is uninformative.} Median values range 61.5--70.0\,s
+with heavily overlapping ranges, and Arm~E's \emph{mean} (75.2\,s) is
+\emph{slower} than Arm~A's (67.5\,s). All arms that proved optimality
+found the same objective value (495.0), confirming the tags do not alter
+the model.
+
+\subsection{What the Null Result Establishes}
+Despite the lack of a statistically significant speedup, the following claims
+are independently verified:
+\begin{itemize}
+  \item Two domain-specific capabilities were implemented at solver source
+        level in 9~files, adding 245~lines while modifying two existing lines
+        and deleting none.
+  \item Neither is reachable through the public API: \texttt{NewBoolVar}
+        gives every placement variable domain size~2, so
+        \texttt{CHOOSE\_MIN\_DOMAIN\_SIZE} scores all variables identically;
+        no upstream generator expresses a division-day fragment.
+  \item The patch is inert on any untagged model and, when disabled, is
+        statistically indistinguishable from the unpatched build (Arm~B,
+        $p{=}1.000$).
+  \item Every arm that reached optimality found the identical objective
+        value~495.0, confirming the tags carry no semantic change to the
+        constraint set.
+\end{itemize}
+
+% ------------------------------------------------------------ Conclusion
+\section{Conclusion}\label{sec:conclusion}
+
+We have described a source-level extension of Google OR-Tools CP-SAT that
+injects timetabling domain knowledge via variable-name tags, enabling a
+division-day LNS generator and a dynamic MRV branching strategy. The
+platform generates a 3-axis Pareto front for a real-world engineering college
+timetable and is backed by a five-arm ablation study. NEP-aligned credit
+structures and cross-divisional elective offerings are handled natively through
+the division-day group abstraction, which decomposes naturally along the
+boundaries that NEP's flexible curriculum framework introduces.
+
+The central finding is a nuanced null result: the C++ extensions integrate
+cleanly and provide correctness guarantees, but on the DJSCE CSE-DS instance
+they do not produce a statistically significant improvement over a
+Python-level static ordering. CP-SAT's general-purpose portfolio is
+surprisingly robust, and the most practically impactful step was the
+Tier-0 pre-ordering---achievable without any source modification.
+
+Future work will increase the seed budget ($n{\ge}46$ per arm) to settle
+the Arm~C--E comparison definitively, extend the platform to additional
+years and branches of DJSCE, and investigate whether the division-day LNS
+generator's benefit scales with instance size.
+
+% ---------------------------------------------------------- Bibliography
+\begin{thebibliography}{00}
+
+\bibitem{Even1975}
+S.~Even, A.~Itai, and A.~Shamir, ``On the complexity of timetable and
+multicommodity flow problems,'' \textit{SIAM J.\ Comput.}, vol.~5, no.~4,
+pp.~691--703, 1976.
+
+\bibitem{cplex}
+IBM Corp., \textit{IBM ILOG CPLEX Optimization Studio 22.1 User's Manual},
+IBM, 2022.
+
+\bibitem{gurobi}
+Gurobi Optimization, LLC, \textit{Gurobi Optimizer Reference Manual},
+Gurobi Optimization, LLC, 2023. [Online]. Available: \url{https://www.gurobi.com}
+
+\bibitem{ortools}
+L.~Perron and V.~Furnon, ``OR-Tools,'' Google LLC, 2023. [Online]. Available:
+\url{https://developers.google.com/optimization}
+
+\bibitem{Perron2023}
+L.~Perron and F.~Didier, ``CP-SAT: A constraint programming solver,''
+in \textit{Proc.\ Integration of Constraint Programming, Artificial Intelligence,
+and Operations Research (CPAIOR)}, 2023.
+
+\bibitem{Schaerf1999}
+A.~Schaerf, ``A survey of automated timetabling,''
+\textit{Artif.\ Intell.\ Rev.}, vol.~13, no.~2, pp.~87--127, 1999.
+
+\bibitem{Burke2002}
+E.~K.~Burke and S.~Petrovic, ``Recent research directions in automated
+timetabling,'' \textit{Eur.\ J.\ Oper.\ Res.}, vol.~140, no.~2,
+pp.~266--280, 2002.
+
+\bibitem{ITC2007}
+B.~McCollum \textit{et al.}, ``Setting the research agenda in automated
+timetabling: The second international timetabling competition,''
+\textit{INFORMS J.\ Comput.}, vol.~22, no.~1, pp.~120--130, 2010.
+
+\bibitem{ITC2019}
+T.~M\"uller, H.~Rudov{\'a}, and Z.~Hanzak, ``University course timetabling
+and the international timetabling competition 2019,'' in \textit{Proc.\
+PATAT~2020}, 2020.
+
+\bibitem{Pillay2018}
+N.~Pillay and R.~Qu, \textit{Hyper-heuristics: Theory and Applications}.
+Springer, 2018.
+
+\bibitem{Baptiste2001}
+P.~Baptiste, C.~Le~Pape, and W.~Nuijten, \textit{Constraint-Based Scheduling}.
+Springer, 2001.
+
+\bibitem{Ohrimenko2009}
+O.~Ohrimenko, P.~J.~Stuckey, and M.~Codish, ``Propagation via lazy clause
+generation,'' \textit{Constraints}, vol.~14, no.~3, pp.~357--391, 2009.
+
+\bibitem{Shaw1998}
+P.~Shaw, ``Using constraint programming and local search methods to solve
+vehicle routing problems,'' in \textit{Proc.\ CP-98}, LNCS vol.~1520,
+pp.~417--431, 1998.
+
+\bibitem{Pisinger2010}
+D.~Pisinger and S.~Ropke, ``Large neighborhood search,'' in
+\textit{Handbook of Metaheuristics}, 2nd~ed., M.~Gendreau and J.-Y.~Potvin,
+Eds.\ Springer, 2010, pp.~399--419.
+
+\bibitem{Chu2012}
+G.~Chu and P.~J.~Stuckey, ``Improving combinatorial optimisation with
+clause learning,'' in \textit{Proc.\ CP-2012}, LNCS vol.~7514,
+pp.~205--221, 2012.
+
+\bibitem{Haralick1980}
+R.~M.~Haralick and G.~L.~Elliott, ``Increasing tree search efficiency for
+constraint satisfaction problems,'' \textit{Artif.\ Intell.}, vol.~14,
+no.~3, pp.~263--313, 1980.
+
+\bibitem{Mavrotas2009}
+G.~Mavrotas, ``Effective implementation of the $\varepsilon$-constraint method
+in multi-objective mathematical programming problems,''
+\textit{Appl.\ Math.\ Comput.}, vol.~213, no.~2, pp.~455--465, 2009.
+
+\end{thebibliography}
+
+\end{document}

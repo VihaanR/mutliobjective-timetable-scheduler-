@@ -16,7 +16,8 @@ The complete change is **9 files, 245 insertions, 2 modified lines, 0 deletions*
 [`third_party/or-tools-fork/timetabling.patch`](third_party/or-tools-fork/timetabling.patch).
 
 - **[CHANGES_DONE.md](CHANGES_DONE.md)** — the full technical write-up: every code change with
-  rationale, why parameters cannot express these features, and the measured results.
+  rationale, why parameters cannot express these features, epsilon-constraint Pareto implementation
+  details, and the measured results.
 
 ---
 

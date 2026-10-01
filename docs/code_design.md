@@ -205,7 +205,7 @@ module's confirm, which just flips one boolean). §4 above is what this *automat
 this session did it by hand instead (manually reading the photographed timetables), which is what
 "for now I'll send you the timetables and you OCR it yourself" asked for.
 
-## 8. Cross-year branch identity on the teaching timetable + "Generate All Years"
+## 8. Cross-year branch identity on the teaching timetable + semester cohorts
 
 Two gaps this closed: (1) a solved grid carried only an opaque `Division.id` ("D1") with no
 department/year/semester attached, and (2) every solve was scoped to exactly one branch, so a
@@ -235,21 +235,19 @@ every division AND every per-cell session entry gets `class_label` ("SY Sem IV �
 is qualified on a multi-branch run), etc. Kept as a post-processing pass specifically so the engine
 stays branch-unaware — `engine/` has no concept of "branch" and shouldn't need one.
 
-**`POST /api/runs` with `branch_ids: null`** now actually solves the whole institution (every
-seeded branch, shared rooms/faculty) instead of being permanently blocked by the collision guard.
-The platform page's "Generate All Years Timetable" button (`platform.html`/`.js`) is exactly this —
-bypasses the Branch/Year/Semester picker, submits `branch_ids: null`. `TimetableRun.branch_ids`
-records which branches a run actually covered (`[]` conventionally means "all of them" isn't
-recorded that way — the router resolves `null` to every branch id that existed *at generate time*
-and stores that list, so a run stays self-describing even if branches are added/removed later).
+**`POST /api/runs` with `branch_ids: null`** can solve the whole institution (every seeded branch,
+sharing rooms/faculty) instead of being permanently blocked by the collision guard. For the normal
+term workflow, the Platform page offers **Generate Odd Semesters** and **Generate Even Semesters**.
+They submit `semester_group: "odd"` or `"even"`; the server, rather than the browser, resolves that
+to every currently loaded Sem I/III/V/VII or Sem II/IV/VI/VIII branch. It rejects an empty group and
+does not permit a caller to mix a cohort with hand-picked `branch_ids`. `TimetableRun.branch_ids`
+records the resolved list, so a run stays self-describing even if branches are added or removed
+later.
 
-**Verified end-to-end** (2026-08-21, greedy solver, 4 seeded branches — SY Sem III/IV, TY Sem V,
-BTech Sem VII): a `branch_ids: null` run produced 11 divisions across all four branches with
-correctly qualified ids and `class_label`s ("SY Sem IV · D1", "TY Sem V · D1", "BTech Sem VII ·
-D2/D3", …); faculty `NM` (Dr. Nilesh Marathe)'s `/api/faculty/me/timetable` merged sessions from
-three different years in one response (`classes: ["BTech Sem VII · D2", "BTech Sem VII · D3", "SY
-Sem IV · D1", "TY Sem V · D1"]`, `spans_multiple_branches: true`) — exactly the "one teacher's
-lectures across all years" view this was built for. A parallel single-branch run confirmed
+**Verified end-to-end:** with the four seeded branches (SY Sem III/IV, TY Sem V, BTech Sem VII),
+an odd cohort contains exactly Sem III, V and VII, gives every division a qualified id and
+`class_label`, and excludes Sem IV. `/api/faculty/me/timetable` then merges that teacher's sessions
+from the generated cohort into one labelled weekly grid. A parallel single-branch run confirms
 unqualified ids (`"D1"`, not `"CSE-DS-SY-SEM4::D1"`) are unchanged.
 
 An additive SQLite migration (`webapp/db._apply_additive_migrations`) adds `TimetableRun.

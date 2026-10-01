@@ -33,11 +33,11 @@ def my_timetable(session: Session = Depends(get_session), principal: dict = Depe
     `webapp.grid_meta.annotate_grids` - `class_label`, `year_label`, `semester`, etc.
 
     A teacher who teaches e.g. SY and TY only sees both years here if a single run's `grids`
-    actually contains both — which is exactly what the "Generate All Years Timetable" button on
-    the platform page produces (`POST /api/runs` with `branch_ids: null`). A run scoped to one
+    actually contains both — which is exactly what the "Generate Odd/Even Semesters" button on
+    the platform page produces (`POST /api/runs` with `semester_group="odd"` or `"even"`). A run scoped to one
     branch can only ever show that one branch's sessions, however recent it is; this endpoint
-    always reads the single latest "done" run, so generating a fresh single-branch run after an
-    all-years one will narrow this view back down to that one branch until an all-years run is
+    always reads the single latest "done" run, so generating a fresh single-branch run after a
+    cohort run will narrow this view back down to that one branch until an odd/even cohort is
     generated again.
     """
     faculty = get_or_404(session, Faculty, principal["id"])

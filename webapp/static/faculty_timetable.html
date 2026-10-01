@@ -32,7 +32,7 @@
     <h2>My teaching timetable</h2>
     <p class="status-line" id="status">Loading…</p>
     <p class="notes" id="multiYearHint" style="display:none;">Showing lectures merged across every
-      year/division you teach, from the latest "Generate All Years Timetable" run.</p>
+      year/division you teach, from the latest "Generate Odd/Even Semesters" run.</p>
     <div id="gridArea"></div>
   </div>
   <div class="legend">
@@ -130,8 +130,8 @@ async function loadTimetable() {
   } else if (data.classes && data.classes.length === 1) {
     $("multiYearHint").style.display = "";
     $("multiYearHint").textContent =
-      "This is from a single-class run — ask an admin to run \"Generate All Years Timetable\" " +
-      "on the Platform page to see your lectures across every year you teach.";
+      "This is from a single-class run — ask an admin to run the matching \"Generate Odd/Even " +
+      "Semesters\" cohort on the Platform page to see your lectures across that term's years.";
   }
   gridArea.innerHTML = "";
   gridArea.appendChild(buildGridTable(data));

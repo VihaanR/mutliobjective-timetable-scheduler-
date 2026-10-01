@@ -55,6 +55,69 @@ def test_generate_greedy_runs_to_done(client):
     assert isinstance(body["hard"], int)
 
 
+def test_generate_odd_semester_cohort_uses_every_loaded_odd_branch(client):
+    """The API derives the cohort from semester metadata, excluding the loaded Sem IV branch.
+
+    This prevents a stale Platform page (or a hand-built branch-id list) from quietly omitting a
+    year from an odd-semester timetable.
+    """
+    _seed(client)  # Sem IV, which must not be included
+    for dataset in ("sy-sem3", "ty-sem5", "btech-sem7"):
+        seeded = client.post(f"/api/seed/{dataset}")
+        assert seeded.status_code == 200, seeded.text
+
+    # AS teaches in all three odd-semester datasets. Give that faculty member a login so the
+    # generated cohort can also prove the teacher-facing merged grid is populated and labelled.
+    faculty_list = client.get("/api/faculty").json()
+    as_faculty = next(f for f in faculty_list if f["code"] == "AS")
+    with Session(get_engine()) as session:
+        row = session.get(Faculty, as_faculty["id"])
+        row.email = "as@djsce.edu.in"
+        row.password_hash = hash_password("aspass123")
+        session.add(row)
+        session.commit()
+
+    r = client.post(
+        "/api/runs",
+        json={"solver": "greedy", "time_limit": 3, "semester_group": "odd"},
+    )
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+
+    body = client.get(f"/api/runs/{run_id}").json()
+    assert body["status"] == "done"
+    assert body["label"] == "Odd semesters"
+    assert len(body["branch_ids"]) == 3
+    labels = {d.get("class_label", "") for d in body["grids"]["divisions"]}
+    assert any("SY Sem III" in label for label in labels)
+    assert any("TY Sem V" in label for label in labels)
+    assert any("BTech Sem VII" in label for label in labels)
+    assert not any("Sem IV" in label for label in labels)
+
+    with TestClient(app) as as_client:
+        login = as_client.post(
+            "/api/auth/login",
+            json={"role": "faculty", "email": "as@djsce.edu.in", "password": "aspass123"},
+        )
+        assert login.status_code == 200, login.text
+        teaching = as_client.get("/api/faculty/me/timetable")
+        assert teaching.status_code == 200, teaching.text
+        teacher_body = teaching.json()
+        assert teacher_body["spans_multiple_branches"] is True
+        assert any("SY Sem III" in label for label in teacher_body["classes"])
+        assert any("TY Sem V" in label for label in teacher_body["classes"])
+
+
+def test_generate_semester_cohort_rejects_empty_group(client):
+    _seed(client)  # only Sem IV is loaded
+    r = client.post(
+        "/api/runs",
+        json={"solver": "greedy", "time_limit": 3, "semester_group": "odd"},
+    )
+    assert r.status_code == 400
+    assert "no loaded branches" in r.json()["detail"]
+
+
 def test_generate_on_empty_db_rejected(client):
     r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     assert r.status_code == 400

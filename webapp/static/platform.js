@@ -27,8 +27,9 @@ $("branchRefreshBtn").addEventListener("click", () => loadBranches());
 $("deptSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("yearSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("semSelect").addEventListener("change", () => { renderResolvedBranch(); checkReadiness(); });
-$("generateBtn").addEventListener("click", () => generate(false));
-$("generateAllYearsBtn").addEventListener("click", () => generate(true));
+$("generateBtn").addEventListener("click", () => generate("single"));
+if ($("generateOddSemsBtn")) $("generateOddSemsBtn").addEventListener("click", () => generate("odd"));
+if ($("generateEvenSemsBtn")) $("generateEvenSemsBtn").addEventListener("click", () => generate("even"));
 $("compareBtn").addEventListener("click", runCompare);
 $("adjustBtn").addEventListener("click", adjust);
 $("restoreBtn").addEventListener("click", restoreOriginal);
@@ -158,11 +159,10 @@ function renderResolvedBranch() {
 // Show a red alert for every selected branch that carries a Branch.notice caveat. These flag
 // known gaps in what is modelled (e.g. Sem VII's D1 absent on OJT) -- surfaced up-front rather
 // than after a solve, because a clean-looking timetable is exactly when such a gap gets missed.
-function renderBranchNotices() {
+function renderBranchNotices(branches = [selectedBranch()].filter(Boolean)) {
   const box = $("branchNotices");
   if (!box) return;
-  const chosen = selectedBranch();
-  const withNotice = chosen && chosen.notice ? [chosen] : [];
+  const withNotice = branches.filter((b) => b && b.notice);
   box.innerHTML = withNotice
     .map((b) => {
       const [lead, ...rest] = String(b.notice).split("OPEN QUESTION:");
@@ -218,16 +218,21 @@ function renderReadiness(data) {
 }
 
 // ---------------------------------------------------------------- 3. generate
-// `allYears=true` ignores the Branch/Year/Semester picker and solves the whole institution
-// (branch_ids: null) in one run, sharing rooms/faculty across every loaded year — this is what
-// lets "My Timetable" show one teacher's lectures across SY/TY/Final Year, since that view just
-// reads the most recent "done" run and a single-branch run can never contain another year's
-// sessions.
-async function generate(allYears) {
-  const genBtn = $("generateBtn"), allBtn = $("generateAllYearsBtn");
+// `mode` can be "single", "odd", or "even". "odd"/"even" ignores the picker and solves all
+// branches with odd/even semesters, sharing rooms/faculty across every loaded year.
+async function generate(mode) {
+  const genBtn = $("generateBtn"), oddBtn = $("generateOddSemsBtn"), evenBtn = $("generateEvenSemsBtn");
+  // `null` means "all branches" to the API, but it must never be the accidental result of a
+  // not-yet-loaded or unresolved picker. The plain action is specifically one complete selected
+  // year; only an explicit cohort button may widen that scope.
+  if (mode === "single" && !selectedBranch()) {
+    $("genStatus").textContent = "choose a Department, Year, and Semester before generating a selected year.";
+    return;
+  }
   genBtn.disabled = true;
-  allBtn.disabled = true;
-  $("genStatus").textContent = allYears ? "submitting (all years)…" : "submitting…";
+  if(oddBtn) oddBtn.disabled = true;
+  if(evenBtn) evenBtn.disabled = true;
+  $("genStatus").textContent = mode !== "single" ? `submitting (${mode} semesters)…` : "submitting…";
   $("summary").style.display = "none";
   $("stagesWrap").style.display = "none";
   $("exportRow").style.display = "none";
@@ -238,11 +243,20 @@ async function generate(allYears) {
   currentRunId = null;
   clearTimeout(pollTimer);
 
+  const semester_group = mode === "single" ? null : mode;
+  const branch_ids = mode === "single" ? getSelectedBranchIds() : null;
+  if (semester_group) {
+    // The cohort buttons deliberately ignore the picker, so keep any branch caveat (such as a
+    // Sem VII OJT division that has not been modelled) visible before the solve is submitted.
+    const remainder = semester_group === "odd" ? 1 : 0;
+    renderBranchNotices(allBranches.filter((b) => b.semester > 0 && b.semester % 2 === remainder));
+  }
+
   const payload = {
     solver: $("solver").value,
     time_limit: parseFloat($("timeLimit").value) || 30,
-    label: allYears ? "All years" : "",
-    branch_ids: allYears ? null : getSelectedBranchIds(),
+    branch_ids: branch_ids,
+    semester_group: semester_group,
   };
 
   try {
@@ -257,13 +271,15 @@ async function generate(allYears) {
       renderReadiness({ ready: false, issues });
       $("genStatus").textContent = "not ready — see the readiness banner above.";
       genBtn.disabled = false;
-      allBtn.disabled = false;
+      if(oddBtn) oddBtn.disabled = false;
+      if(evenBtn) evenBtn.disabled = false;
       return;
     }
     if (res.status === 409) {
       $("genStatus").textContent = "a run is already in progress — try again shortly.";
       genBtn.disabled = false;
-      allBtn.disabled = false;
+      if(oddBtn) oddBtn.disabled = false;
+      if(evenBtn) evenBtn.disabled = false;
       return;
     }
     if (!res.ok) {
@@ -272,12 +288,13 @@ async function generate(allYears) {
     }
     const data = await res.json();
     currentRunId = data.run_id;
-    $("genStatus").textContent = `run #${currentRunId} queued${allYears ? " (all years)" : ""}…`;
+    $("genStatus").textContent = `run #${currentRunId} queued${data.label ? ` (${data.label})` : ""}…`;
     pollRun(currentRunId);
   } catch (e) {
     $("genStatus").textContent = "error: " + (e.message || e);
     genBtn.disabled = false;
-    allBtn.disabled = false;
+    if(oddBtn) oddBtn.disabled = false;
+    if(evenBtn) evenBtn.disabled = false;
   }
 }
 
@@ -294,7 +311,8 @@ function pollRun(runId) {
         return;
       }
       $("generateBtn").disabled = false;
-      $("generateAllYearsBtn").disabled = false;
+      if($("generateOddSemsBtn")) $("generateOddSemsBtn").disabled = false;
+      if($("generateEvenSemsBtn")) $("generateEvenSemsBtn").disabled = false;
       if (run.status === "done") {
         $("genStatus").textContent = `run #${runId} done.`;
         renderSummary(run);
@@ -320,7 +338,8 @@ function pollRun(runId) {
     .catch((e) => {
       $("genStatus").textContent = "error polling run: " + (e.message || e);
       $("generateBtn").disabled = false;
-      $("generateAllYearsBtn").disabled = false;
+      if($("generateOddSemsBtn")) $("generateOddSemsBtn").disabled = false;
+      if($("generateEvenSemsBtn")) $("generateEvenSemsBtn").disabled = false;
     });
 }
 

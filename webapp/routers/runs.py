@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -44,6 +45,9 @@ class GenerateRequest(BaseModel):
     time_limit: float = 30.0
     label: str = ""
     branch_ids: list[int] | None = None
+    # Resolved by the API so a cohort always includes every branch currently loaded in the DB,
+    # not merely the branches that happened to be present when the browser page was opened.
+    semester_group: Literal["odd", "even"] | None = None
 
 
 class CompareRequest(BaseModel):
@@ -51,6 +55,33 @@ class CompareRequest(BaseModel):
     label: str = ""
     branch_ids: list[int] | None = None
     solvers: list[str] | None = None
+
+
+def _generation_branch_ids(session: Session, body: GenerateRequest) -> list[int] | None:
+    """Resolve an odd/even cohort to its current branch ids.
+
+    ``None`` retains the existing ordinary-generation meaning of "all branches". An empty
+    cohort is rejected rather than accidentally becoming that all-branches selection.
+    """
+    if body.semester_group is None:
+        return body.branch_ids
+    if body.branch_ids is not None:
+        raise HTTPException(status_code=400, detail="semester_group cannot be combined with branch_ids")
+
+    remainder = 1 if body.semester_group == "odd" else 0
+    branch_ids = [
+        branch.id
+        for branch in session.exec(select(Branch)).all()
+        if branch.id is not None
+        and branch.semester > 0
+        and branch.semester % 2 == remainder
+    ]
+    if not branch_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"no loaded branches have an {body.semester_group}-numbered semester",
+        )
+    return branch_ids
 
 
 @router.post("/runs")
@@ -69,16 +100,18 @@ def generate(
     if body.solver != "pipeline" and body.solver not in SOLVERS:
         raise HTTPException(status_code=400, detail=f"unknown solver {body.solver!r}")
 
+    branch_ids = _generation_branch_ids(session, body)
+
     # A selection spanning several branches must use branch-qualified engine ids, or the years'
     # identically-named divisions (every year has a D1) collapse into one. Decided from the DB, not
     # from the request, so `branch_ids=null` (all years) is handled the same as an explicit list.
-    qualify_ids = spans_multiple_branches(session, body.branch_ids)
+    qualify_ids = spans_multiple_branches(session, branch_ids)
 
-    problem, issues = readiness(session, body.branch_ids, qualify_ids=qualify_ids)
+    problem, issues = readiness(session, branch_ids, qualify_ids=qualify_ids)
     if problem is None or issues:
         raise HTTPException(status_code=400, detail=issues)
 
-    covered = body.branch_ids if body.branch_ids is not None else [
+    covered = branch_ids if branch_ids is not None else [
         b.id for b in session.exec(select(Branch)).all()
     ]
 
@@ -86,17 +119,17 @@ def generate(
         status="queued",
         solver=body.solver,
         time_limit=body.time_limit,
-        label=body.label,
+        label=body.label or (f"{body.semester_group.title()} semesters" if body.semester_group else ""),
         problem_snapshot=problem_to_dict(problem),
         branch_ids=list(covered),
-        division_meta=build_division_meta(session, body.branch_ids, qualify_ids=qualify_ids),
+        division_meta=build_division_meta(session, branch_ids, qualify_ids=qualify_ids),
     )
     session.add(run)
     session.commit()
     session.refresh(run)
 
     background.add_task(run_generation, run.id)
-    return {"run_id": run.id}
+    return {"run_id": run.id, "branch_ids": run.branch_ids, "label": run.label}
 
 
 def _run_solver_compare(problem, solver_name: str, time_limit: float,

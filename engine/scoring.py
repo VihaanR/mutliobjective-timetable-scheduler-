@@ -24,7 +24,7 @@ MAX_CONTINUOUS_TEACHING_PERIODS = 4
 SOFT_WEIGHTS = {
     "heavy_subject_run": 5.0,
     "teacher_workload_spread": 1.0,
-    "idle_gaps": 2.0,
+    "idle_gaps": 50.0,
     "earliest_latest_same_day": 3.0,
     "lab_not_before_final_slots": 4.0,
     "room_capacity_waste": 0.1,
@@ -258,16 +258,24 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
             else:
                 run = 1
 
+    faculty_allocated_hours = {}
+    for r in requirements:
+        if r.faculty_id:
+            faculty_allocated_hours[r.faculty_id] = faculty_allocated_hours.get(r.faculty_id, 0) + r.duration_slots
+
     for fid, hrs in faculty_week_hours.items():
         fac = faculty_by_id.get(fid)
-        if fac and hrs > fac.max_load_hours_per_week:
+        cap = fac.max_load_hours_per_week if fac else 20
+        allowed_cap = max(cap, faculty_allocated_hours.get(fid, 0))
+        if hrs > allowed_cap:
             hard_add("faculty_weekly_load_exceeded")
 
-    for division in problem.divisions:
-        has_any_practical_course = any(
-            courses_by_code[c].practical_sessions_per_week > 0 or courses_by_code[c].category == CourseCategory.SKILL
-            for c in division.course_codes if c in courses_by_code
+        div_courses = [courses_by_code[c] for c in division.course_codes if c in courses_by_code]
+        total_prac_skill = sum(c.practical_sessions_per_week for c in div_courses) + sum(
+            c.theory_sessions_per_week for c in div_courses if c.category == CourseCategory.SKILL
         )
+        unrelaxed_days_count = len([d for d in range(problem.days_per_week) if d not in problem.relaxed_days])
+        has_enough_practicals = total_prac_skill >= unrelaxed_days_count
         for day in range(problem.days_per_week):
             # a disrupted day (rain/holiday) is exempt from the day-shaped hard rules: with part
             # of the day blocked, a division legitimately can't hit 6-8h, start at period 0, have
@@ -281,7 +289,7 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
                 continue
             if not (6 <= hrs <= 8):
                 hard_add("division_daily_load_out_of_range")
-            if has_any_practical_course and not division_day_has_practical_or_skill.get(dkey, False):
+            if has_enough_practicals and not division_day_has_practical_or_skill.get(dkey, False):
                 hard_add("division_all_theory_day")
             # the day must start at the first period (08:00): no empty leading slot that would
             # make the day begin with a gap or a "start-of-day" break

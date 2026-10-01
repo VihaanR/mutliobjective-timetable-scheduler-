@@ -1,32 +1,57 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-scratch/
-*.log
-.pytest_cache/
+*.py[cod]
+*$py.class
+*.so
 
-# editor / OS cruft
+# Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Benchmark virtualenvs
+.venv-fork/
+.venv-baseline/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# Temporary & scratch files
+scratch/
+.dump/
+*.tmp
+*.swp
+*.bak
+
+# Editor & OS cruft
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.user
+.gemini/
+.agents/
 
-# virtual envs
-venv/
-.venv/
-env/
-
-# webapp platform runtime state (SQLite DB + uploaded files) -- never committed
+# Webapp platform runtime state (SQLite DB + uploaded files) -- never committed
 webapp/data/
 webapp/uploads/
 research/fork_benchmark_results.json
-
-# Benchmark virtualenvs: each holds a ~45MB compiled OR-Tools build (fork / unpatched
-# baseline). Rebuild them from the wheels on the Releases page, never commit them.
-.venv-fork/
-.venv-baseline/
-
-# CP-SAT model dumps (cp_model_dump_models), used to prove the tags survive presolve.
-.dump/
-
-# Runtime upload directory, created by calendar.get_upload_dir() on startup.
-webapp/uploads/

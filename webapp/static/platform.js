@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const TYPE_CLASS = { Theory: "theory", Practical: "lab", Tutorial: "tutorial", Break: "break" };
 
 let currentGrids = null;
+let currentViewMode = "divisions";  // "divisions" | "classrooms" | "labs" | "teachers"
 let activeDivision = 0;
 let currentRunId = null;
 let pollTimer = null;
@@ -17,8 +18,9 @@ let movedIds = new Set();          // session ids relocated by the last adjustme
 // above: /api/compare is a one-shot synchronous call that never creates a run, so it must never
 // disturb the generated run that the adjust panel operates on.
 let compareResults = null;         // results[] from the last successful /api/compare response
+let compareViewMode = "divisions";  // "divisions" | "classrooms" | "labs" | "teachers"
 let compareActiveSolver = 0;       // index into compareResults for the active solver tab
-let compareActiveDivision = 0;     // division tab index within the active solver's grids
+let compareActiveDivision = 0;     // entity tab index within the active solver's grids
 
 $("seedBtn").addEventListener("click", loadSeed);
 $("branchRefreshBtn").addEventListener("click", () => loadBranches());
@@ -27,13 +29,40 @@ $("branchRefreshBtn").addEventListener("click", () => loadBranches());
 $("deptSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("yearSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
 $("semSelect").addEventListener("change", () => { renderResolvedBranch(); checkReadiness(); });
-$("generateBtn").addEventListener("click", () => generate(false));
-$("generateAllYearsBtn").addEventListener("click", () => generate(true));
+$("generateBtn").addEventListener("click", () => generate("selected"));
+const oddBtn = $("generateOddYearsBtn");
+if (oddBtn) oddBtn.addEventListener("click", () => generate("odd"));
+const evenBtn = $("generateEvenYearsBtn");
+if (evenBtn) evenBtn.addEventListener("click", () => generate("even"));
+$("generateAllYearsBtn").addEventListener("click", () => generate("all"));
 $("compareBtn").addEventListener("click", runCompare);
 $("adjustBtn").addEventListener("click", adjust);
 $("restoreBtn").addEventListener("click", restoreOriginal);
 $("adjScope").addEventListener("change", () => {
   $("adjFromWrap").style.display = $("adjScope").value === "from" ? "" : "none";
+});
+
+["divisions", "classrooms", "labs", "teachers"].forEach((mode) => {
+  const btn = $(`viewMode${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
+  if (btn) {
+    btn.addEventListener("click", () => {
+      currentViewMode = mode;
+      document.querySelectorAll("#viewTypeTabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+      activeDivision = 0;
+      renderTabs();
+      renderGrid();
+    });
+  }
+  const cmpBtn = $(`cmpViewMode${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
+  if (cmpBtn) {
+    cmpBtn.addEventListener("click", () => {
+      compareViewMode = mode;
+      document.querySelectorAll("#compareViewTypeTabs .tab").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+      compareActiveDivision = 0;
+      renderCompareDivisionTabs();
+      renderCompareGrid();
+    });
+  }
 });
 
 // ---------------------------------------------------------------- 1. starter data
@@ -223,11 +252,35 @@ function renderReadiness(data) {
 // lets "My Timetable" show one teacher's lectures across SY/TY/Final Year, since that view just
 // reads the most recent "done" run and a single-branch run can never contain another year's
 // sessions.
-async function generate(allYears) {
+let genStartTime = null;
+let genTimerInterval = null;
+
+async function generate(mode = "selected") {
   const genBtn = $("generateBtn"), allBtn = $("generateAllYearsBtn");
-  genBtn.disabled = true;
-  allBtn.disabled = true;
-  $("genStatus").textContent = allYears ? "submitting (all years)…" : "submitting…";
+  const oddBtn = $("generateOddYearsBtn"), evenBtn = $("generateEvenYearsBtn");
+  [genBtn, allBtn, oddBtn, evenBtn].forEach(b => { if (b) b.disabled = true; });
+
+  let branch_ids = null;
+  let label = "All Years";
+  if (mode === "odd") {
+    const oddBranches = allBranches.filter(b => b.semester && b.semester % 2 !== 0);
+    branch_ids = oddBranches.length ? oddBranches.map(b => b.id) : [2, 3, 4];
+    label = "All Odd Semesters (Sem 3 + 5 + 7)";
+  } else if (mode === "even") {
+    const evenBranches = allBranches.filter(b => b.semester && b.semester % 2 === 0);
+    branch_ids = evenBranches.length ? evenBranches.map(b => b.id) : [1];
+    label = "All Even Semesters (Sem 4 + 6 + 8)";
+  } else if (mode === "selected") {
+    branch_ids = getSelectedBranchIds();
+    label = "";
+  } else {
+    branch_ids = null;
+    label = "All Loaded Years";
+  }
+
+  const statusEl = $("genStatus");
+  statusEl.className = "status-line active-gen";
+  statusEl.innerHTML = `<div class="gen-spinner"></div> <span>Submitting <b>${label || "selected class"}</b> to solver…</span>`;
   $("summary").style.display = "none";
   $("stagesWrap").style.display = "none";
   $("exportRow").style.display = "none";
@@ -237,12 +290,13 @@ async function generate(allYears) {
   currentGrids = null;
   currentRunId = null;
   clearTimeout(pollTimer);
+  clearInterval(genTimerInterval);
 
   const payload = {
-    solver: $("solver").value,
-    time_limit: parseFloat($("timeLimit").value) || 30,
-    label: allYears ? "All years" : "",
-    branch_ids: allYears ? null : getSelectedBranchIds(),
+    solver: $("solver").value || "cpsat",
+    time_limit: parseFloat($("timeLimit").value) || 180,
+    label: label,
+    branch_ids: branch_ids,
   };
 
   try {
@@ -255,15 +309,15 @@ async function generate(allYears) {
       const body = await res.json();
       const issues = Array.isArray(body.detail) ? body.detail : [String(body.detail)];
       renderReadiness({ ready: false, issues });
-      $("genStatus").textContent = "not ready — see the readiness banner above.";
-      genBtn.disabled = false;
-      allBtn.disabled = false;
+      statusEl.className = "status-line";
+      statusEl.textContent = "not ready — see the readiness banner above.";
+      [genBtn, allBtn, oddBtn, evenBtn].forEach(b => { if (b) b.disabled = false; });
       return;
     }
     if (res.status === 409) {
-      $("genStatus").textContent = "a run is already in progress — try again shortly.";
-      genBtn.disabled = false;
-      allBtn.disabled = false;
+      statusEl.className = "status-line";
+      statusEl.textContent = "a run is already in progress — try again shortly.";
+      [genBtn, allBtn, oddBtn, evenBtn].forEach(b => { if (b) b.disabled = false; });
       return;
     }
     if (!res.ok) {
@@ -272,12 +326,25 @@ async function generate(allYears) {
     }
     const data = await res.json();
     currentRunId = data.run_id;
-    $("genStatus").textContent = `run #${currentRunId} queued${allYears ? " (all years)" : ""}…`;
+    genStartTime = Date.now();
+    statusEl.className = "status-line active-gen";
+    statusEl.innerHTML = `<div class="gen-spinner"></div> <span>⏳ <b>Solver Running (Run #${currentRunId})</b>: Optimizing ${label || "timetable"} across all divisions, classrooms, labs & faculty… <b id="genTimer">0s elapsed</b></span>`;
+    
+    genTimerInterval = setInterval(() => {
+      const el = $("genTimer");
+      if (el && genStartTime) {
+        const s = Math.round((Date.now() - genStartTime) / 1000);
+        el.textContent = `${s}s elapsed`;
+      }
+    }, 1000);
+
     pollRun(currentRunId);
+    loadHistory();
   } catch (e) {
-    $("genStatus").textContent = "error: " + (e.message || e);
-    genBtn.disabled = false;
-    allBtn.disabled = false;
+    statusEl.className = "status-line";
+    statusEl.textContent = "error: " + (e.message || e);
+    clearInterval(genTimerInterval);
+    [genBtn, allBtn, oddBtn, evenBtn].forEach(b => { if (b) b.disabled = false; });
   }
 }
 
@@ -288,15 +355,26 @@ function pollRun(runId) {
       return res.json();
     })
     .then((run) => {
+      const statusEl = $("genStatus");
       if (run.status === "queued" || run.status === "running") {
-        $("genStatus").textContent = `run #${runId} ${run.status}…`;
+        const s = genStartTime ? Math.round((Date.now() - genStartTime) / 1000) : 0;
+        statusEl.className = "status-line active-gen";
+        statusEl.innerHTML = `<div class="gen-spinner"></div> <span>⏳ <b>Solver Running (Run #${runId})</b>: Optimizing ${run.label || "timetable"} with CP-SAT… <b id="genTimer">${s}s elapsed</b></span>`;
         pollTimer = setTimeout(() => pollRun(runId), 1500);
         return;
       }
-      $("generateBtn").disabled = false;
-      $("generateAllYearsBtn").disabled = false;
+      clearInterval(genTimerInterval);
+      const allBtns = [$("generateBtn"), $("generateAllYearsBtn"), $("generateOddYearsBtn"), $("generateEvenYearsBtn")];
+      allBtns.forEach(b => { if (b) b.disabled = false; });
+
       if (run.status === "done") {
-        $("genStatus").textContent = `run #${runId} done.`;
+        if (run.hard === 0) {
+          statusEl.className = "status-line ok";
+          statusEl.innerHTML = `✅ <b>Run #${runId} Done!</b> Successfully generated 100% clash-free timetable in ${run.wall_clock ? Number(run.wall_clock).toFixed(1) : ""}s.`;
+        } else {
+          statusEl.className = "status-line bad";
+          statusEl.innerHTML = `⚠️ <b>Run #${runId} Completed with ${run.hard} hard violation(s).</b>`;
+        }
         renderSummary(run);
         renderStages(run.stage_reports);
         currentGrids = run.grids;
@@ -306,21 +384,24 @@ function pollRun(runId) {
         renderTabs();
         renderGrid();
         $("legend").style.display = "flex";
+        if ($("viewModeBar")) $("viewModeBar").style.display = "flex";
         enableExport(runId);
-        // reveal the disruption panel now that there's a baseline timetable to adjust
         $("adjustSection").style.display = "";
         $("adjustRunId").textContent = "#" + runId;
         $("restoreBtn").style.display = "none";
         $("adjStatus").textContent = "";
+        $("resultSection").scrollIntoView({ behavior: "smooth" });
       } else {
-        $("genStatus").textContent = `run #${runId} failed: ${run.error || "unknown error"}`;
+        statusEl.className = "status-line bad";
+        statusEl.textContent = `❌ Run #${runId} failed: ${run.error || "unknown error"}`;
       }
       loadHistory();
     })
     .catch((e) => {
+      clearInterval(genTimerInterval);
       $("genStatus").textContent = "error polling run: " + (e.message || e);
-      $("generateBtn").disabled = false;
-      $("generateAllYearsBtn").disabled = false;
+      const allBtns = [$("generateBtn"), $("generateAllYearsBtn"), $("generateOddYearsBtn"), $("generateEvenYearsBtn")];
+      allBtns.forEach(b => { if (b) b.disabled = false; });
     });
 }
 
@@ -408,45 +489,54 @@ function renderStages(stages) {
   });
 }
 
-// Generic division-tab renderer: shared by the generate/adjust flow (#tabs, currentGrids) and the
-// compare panel (#compareTabs / #compareDivTabs, compareResults[i].grids) so both reuse the exact
-// same tab markup/behaviour without either touching the other's state.
-function renderDivisionTabs(container, grids, activeIdx, onSelect) {
-  if (!grids || !grids.divisions || grids.divisions.length === 0) {
+// Generic entity helper: returns the array of items for the given view mode
+function getEntitiesForMode(grids, mode) {
+  if (!grids) return [];
+  if (mode === "classrooms") return grids.classrooms || [];
+  if (mode === "labs") return grids.labs || [];
+  if (mode === "teachers") return grids.teachers || [];
+  return grids.divisions || [];
+}
+
+// Generic mode-tab renderer: renders tabs for Divisions, Classrooms, Labs, or Teachers
+function renderModeTabs(container, grids, mode, activeIdx, onSelect) {
+  const items = getEntitiesForMode(grids, mode);
+  if (!items || items.length === 0) {
     container.style.display = "none";
     container.innerHTML = "";
     return;
   }
   container.style.display = "flex";
   container.innerHTML = "";
-  grids.divisions.forEach((div, i) => {
+  items.forEach((item, i) => {
     const t = document.createElement("div");
     t.className = "tab" + (i === activeIdx ? " active" : "");
-    // `class_label` ("SY Sem IV · D1") is stamped on every division by webapp/grid_meta.py once
-    // branch identity is known; a run predating that (or with no branch data at all) falls back to
-    // the bare division id exactly as before.
-    t.textContent = div.class_label && div.class_label !== "—" ? div.class_label : "Division " + div.id;
+    if (mode === "classrooms" || mode === "labs") {
+      t.textContent = item.name ? `${item.name} (${item.id})` : item.id;
+    } else if (mode === "teachers") {
+      t.textContent = item.name ? `${item.name} [${item.code || item.id}]` : (item.code || item.id);
+    } else {
+      t.textContent = item.class_label && item.class_label !== "—" ? item.class_label : "Division " + (item.name || item.id);
+    }
     t.onclick = () => onSelect(i);
     container.appendChild(t);
   });
 }
 
 function renderTabs() {
-  renderDivisionTabs($("tabs"), currentGrids, activeDivision, (i) => {
+  renderModeTabs($("tabs"), currentGrids, currentViewMode, activeDivision, (i) => {
     activeDivision = i;
     renderTabs();
     renderGrid();
   });
 }
 
-// Generic grid-table builder: pure function of (grids, activeIdx, movedSet) -> <table> or null.
-// The generate/adjust flow calls it through renderGrid() below (movedSet = the module-level
-// movedIds, so adjustment highlighting keeps working exactly as before). The compare panel calls
-// it directly with an empty moved-set (compare results are never "adjusted").
-function buildGridTable(grids, activeIdx, movedSet) {
-  if (!grids || !grids.divisions || grids.divisions.length === 0) return null;
+// Generic grid-table builder: pure function of (grids, mode, activeIdx, movedSet) -> <table> or null.
+function buildGridTable(grids, mode, activeIdx, movedSet) {
+  const items = getEntitiesForMode(grids, mode);
+  if (!items || items.length === 0 || !items[activeIdx]) return null;
   const g = grids;
-  const div = g.divisions[activeIdx];
+  const item = items[activeIdx];
   const table = document.createElement("table");
   table.className = "tt";
 
@@ -463,7 +553,7 @@ function buildGridTable(grids, activeIdx, movedSet) {
     tr.innerHTML = `<td class="time-col">${p.start}<br>${p.end}</td>`;
     g.days.forEach((_, dayIdx) => {
       const key = `${dayIdx}_${p.period}`;
-      const entries = div.cells[key] || [];
+      const entries = (item.cells && item.cells[key]) || [];
       const td = document.createElement("td");
       if (entries.length === 0) {
         td.innerHTML = `<div class="cell empty"></div>`;
@@ -473,19 +563,28 @@ function buildGridTable(grids, activeIdx, movedSet) {
         entries.forEach((e) => {
           const s = document.createElement("div");
           s.className = "session " + (TYPE_CLASS[e.type] || "theory") +
-            (movedSet.has(e.session_id) ? " moved" : "");
+            (movedSet && movedSet.has(e.session_id) ? " moved" : "");
           if (e.is_break) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
             const batch = e.batch ? ` · ${e.batch}` : "";
-            // `course_code` (unqualified, e.g. "OE") is what a human should read; `course` is the
-            // raw engine id and is branch-qualified ("CSE-DS-SY-SEM3::OE") whenever this run spans
-            // more than one branch. Falls back to `course` for a run predating that field.
             const courseCode = e.course_code || e.course;
+            let metaHtml = "";
+            if (mode === "classrooms" || mode === "labs") {
+              const divLabel = e.class_label || e.division_name || e.division_id;
+              const facLabel = e.faculty ? ` · ${e.faculty}` : "";
+              metaHtml = `<div class="s-meta">${divLabel}${batch}${facLabel}</div>`;
+            } else if (mode === "teachers") {
+              const divLabel = e.class_label || e.division_name || e.division_id;
+              const rmLabel = e.room ? ` · @${e.room}` : "";
+              metaHtml = `<div class="s-meta">${divLabel}${batch}${rmLabel}</div>`;
+            } else {
+              metaHtml = `<div class="s-meta">${e.faculty ? e.faculty : ""}${e.room ? " · @" + e.room : ""}${batch}</div>`;
+            }
             s.innerHTML =
               `<div class="s-course">${courseCode}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
-              `<div class="s-meta">${e.faculty ? e.faculty : ""}${e.room ? " · @" + e.room : ""}${batch}</div>`;
-            s.title = `${courseCode} — ${e.type}\n${e.faculty_name || ""}\n${e.room_name || ""}`;
+              metaHtml;
+            s.title = `${courseCode} — ${e.type}\nFaculty: ${e.faculty_name || e.faculty || "—"}\nRoom: ${e.room_name || e.room || "—"}\nClass: ${e.class_label || e.division_name || e.division_id}`;
           }
           cell.appendChild(s);
         });
@@ -500,17 +599,12 @@ function buildGridTable(grids, activeIdx, movedSet) {
 }
 
 function renderGrid() {
-  const table = buildGridTable(currentGrids, activeDivision, movedIds);
+  const table = buildGridTable(currentGrids, currentViewMode, activeDivision, movedIds);
   $("gridArea").innerHTML = "";
   if (table) $("gridArea").appendChild(table);
 }
 
 // ---------------------------------------------------------------- 5. compare solvers
-// POST /api/compare is a single synchronous request that runs N solvers back-to-back (no
-// background job, no run row, no history entry, no export links) — very different from the
-// generate flow's queue-and-poll pattern. It never touches currentGrids/currentRunId/movedIds;
-// its own state (compareResults/compareActiveSolver/compareActiveDivision) is entirely separate
-// so the adjust panel keeps operating on the real generated run regardless of what's compared.
 function selectedCompareSolvers() {
   const solvers = [];
   if ($("cmpGreedy").checked) solvers.push("greedy");
@@ -629,7 +723,7 @@ function renderCompareSolverTabs() {
 
 function renderCompareDivisionTabs() {
   const active = compareResults ? compareResults[compareActiveSolver] : null;
-  renderDivisionTabs($("compareDivTabs"), active ? active.grids : null, compareActiveDivision, (i) => {
+  renderModeTabs($("compareDivTabs"), active ? active.grids : null, compareViewMode, compareActiveDivision, (i) => {
     compareActiveDivision = i;
     renderCompareDivisionTabs();
     renderCompareGrid();
@@ -638,7 +732,7 @@ function renderCompareDivisionTabs() {
 
 function renderCompareGrid() {
   const active = compareResults ? compareResults[compareActiveSolver] : null;
-  const table = buildGridTable(active ? active.grids : null, compareActiveDivision, new Set());
+  const table = buildGridTable(active ? active.grids : null, compareViewMode, compareActiveDivision, new Set());
   $("compareGridArea").innerHTML = "";
   if (table) $("compareGridArea").appendChild(table);
 }
@@ -726,6 +820,43 @@ function restoreOriginal() {
 }
 
 // ---------------------------------------------------------------- 7. history
+async function loadSavedRun(runId, autoScroll = true) {
+  try {
+    const statusEl = $("genStatus");
+    if (statusEl) statusEl.textContent = `loading run #${runId}…`;
+    const res = await fetch(`/api/runs/${runId}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const run = await res.json();
+    if (run.status === "done" && run.grids) {
+      const badge = $("activeRunBadge");
+      if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${run.label || "Saved Timetable"}</b> (${run.solver})`;
+      renderSummary(run);
+      renderStages(run.stage_reports);
+      currentGrids = run.grids;
+      originalGrids = run.grids;
+      movedIds = new Set();
+      activeDivision = 0;
+      renderTabs();
+      renderGrid();
+      $("legend").style.display = "flex";
+      if ($("viewModeBar")) $("viewModeBar").style.display = "flex";
+      enableExport(runId);
+      $("adjustSection").style.display = "";
+      $("adjustRunId").textContent = "#" + runId;
+      $("restoreBtn").style.display = "none";
+      $("adjStatus").textContent = "";
+      if (statusEl) statusEl.textContent = `loaded run #${runId} (${run.label || "Saved Timetable"}).`;
+      if (autoScroll) {
+        $("resultSection").scrollIntoView({ behavior: "smooth" });
+      }
+    } else {
+      if (statusEl) statusEl.textContent = `run #${runId} status: ${run.status} (hard: ${run.hard}, error: ${run.error || "none"})`;
+    }
+  } catch (e) {
+    if ($("genStatus")) $("genStatus").textContent = `failed to load run #${runId}: ${e.message || e}`;
+  }
+}
+
 async function loadHistory() {
   try {
     const res = await fetch("/api/runs");
@@ -735,17 +866,29 @@ async function loadHistory() {
     body.innerHTML = "";
     runs.forEach((r) => {
       const tr = document.createElement("tr");
+      tr.style.cursor = "pointer";
+      tr.title = `Click to load Run #${r.id} timetable`;
       const created = (() => {
         const d = new Date(r.created_at);
         return isNaN(d.getTime()) ? r.created_at : d.toLocaleString();
       })();
-      tr.innerHTML = `<td>${r.id}</td><td>${r.label || ""}</td><td>${r.solver}</td>` +
-        `<td>${r.status}</td><td>${r.hard ?? ""}</td><td>${r.soft ?? ""}</td><td>${created}</td>`;
+      tr.innerHTML = `<td><b>#${r.id}</b></td><td>${r.label || ""}</td><td>${r.solver}</td>` +
+        `<td><span class="badge ${r.status === "done" ? (r.hard === 0 ? "badge-success" : "badge-warning") : "badge-danger"}">${r.status}</span></td>` +
+        `<td><b>${r.hard ?? ""}</b></td><td>${r.soft ? Number(r.soft).toFixed(1) : ""}</td><td>${created}</td>` +
+        `<td><button type="button" class="dash-edit-btn" style="color:var(--accent); font-weight:600; cursor:pointer; padding:3px 10px;">👁️ Load</button></td>`;
+      tr.addEventListener("click", () => loadSavedRun(r.id, true));
       body.appendChild(tr);
     });
+
+    // Automatically load the latest successful run if no timetable is currently rendered!
+    if (!currentGrids && runs.length > 0) {
+      const bestRun = runs.find(r => r.status === "done" && r.hard === 0) || runs.find(r => r.status === "done");
+      if (bestRun) {
+        loadSavedRun(bestRun.id, false);
+      }
+    }
   } catch (e) {
-    // history is a nice-to-have; stay quiet on failure (readiness/generate already surface
-    // backend-unreachable errors prominently).
+    // history is a nice-to-have; stay quiet on failure
   }
 }
 

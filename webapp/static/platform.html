@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DJ Sanghvi Timetable Platform</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20261001_v3">
 <style>
   /* Compare-solvers panel (kept local to this page per the theme-migration freeze on style.css;
      reuses existing classes/vars — .panel-section, .controls, .control, .tab, .tt, .stat-val,
@@ -113,35 +113,36 @@
   </section>
 
   <section class="panel-section" id="genSection">
-    <h2>4. Generate</h2>
-    <div class="controls">
+    <h2>4. Generate Timetable</h2>
+    <div class="controls" style="flex-wrap: wrap; gap: 10px; align-items: flex-end;">
       <div class="control">
-        <label>Solver</label>
+        <label>Solver Engine</label>
         <select id="solver">
-          <option value="greedy">Greedy — instant</option>
-          <option value="mip">MIP — exact, medium speed</option>
-          <option value="ga">GA — heuristic, medium speed</option>
-          <option value="cpsat">CP-SAT — best quality, slower</option>
-          <option value="pipeline">Hybrid pipeline (Greedy&rarr;MIP&rarr;GA&rarr;CP-SAT) — slowest</option>
+          <option value="cpsat" selected>CP-SAT (Google OR-Tools) — Optimal & Clash-Free</option>
+          <option value="pipeline">Hybrid Pipeline (Greedy &rarr; MIP &rarr; GA &rarr; CP-SAT)</option>
+          <option value="greedy">Greedy — Instant Preview</option>
+          <option value="mip">MIP (Mixed-Integer Programming)</option>
+          <option value="ga">GA (Genetic Algorithm)</option>
         </select>
       </div>
       <div class="control">
-        <label>Time limit (s)</label>
-        <input type="number" id="timeLimit" value="30" min="2" max="600" step="5">
+        <label>Time Limit (s)</label>
+        <input type="number" id="timeLimit" value="180" min="5" max="1200" step="10">
       </div>
-      <button id="generateBtn">Generate</button>
-      <button type="button" id="generateAllYearsBtn" class="secondary">Generate All Years Timetable</button>
+      <button id="generateBtn" class="secondary">Generate Selected Class</button>
+      <button type="button" id="generateOddYearsBtn" style="background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(16,185,129,0.3);">⚡ Generate All Odd Semesters (Sem 3 + 5 + 7)</button>
+      <button type="button" id="generateEvenYearsBtn" class="secondary">Generate All Even Semesters (Sem 4 + 6 + 8)</button>
+      <button type="button" id="generateAllYearsBtn" class="secondary">Generate All Loaded</button>
     </div>
-    <p class="notes" id="genNote">cpsat / pipeline can take significantly longer than greedy.</p>
-    <p class="notes">"Generate All Years Timetable" ignores the Branch/Year/Semester picker above and
-      solves every loaded branch at once, sharing rooms/faculty across years &mdash; use it so a
-      teacher's "My Timetable" page can show their lectures across SY, TY and Final Year together,
-      not just the one class you last generated.</p>
+    <p class="notes" id="genNote" style="margin-top: 10px;">CP-SAT solves all cross-year shared faculty and lab constraints simultaneously with zero clash and minimal student gaps.</p>
     <div class="status-line" id="genStatus"></div>
   </section>
 
   <section class="panel-section" id="resultSection">
-    <h2>5. Result</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h2 style="margin:0;">5. Result</h2>
+      <span id="activeRunBadge" style="font-size:13px; font-weight:600; color:var(--muted);"></span>
+    </div>
     <div class="readiness-banner not-ready" id="solveWarning" style="display:none"></div>
     <div class="summary" id="summary" style="display:none">
       <div class="stat"><span class="stat-val" id="statSolver">—</span><span class="stat-lbl">solver</span></div>
@@ -159,6 +160,16 @@
     <div class="export-row" id="exportRow" style="display:none">
       <a id="exportXlsx" class="export-link" href="#" target="_blank" rel="noopener">Export Excel (.xlsx)</a>
       <a id="exportPdf" class="export-link" href="#" target="_blank" rel="noopener">Export PDF</a>
+    </div>
+
+    <div class="view-mode-bar" id="viewModeBar" style="display:none">
+      <span style="font-weight:600; font-size:13.5px; margin-right:4px; color:var(--muted);">View timetable:</span>
+      <div class="tabs view-type-tabs" style="margin-bottom:0;" id="viewTypeTabs">
+        <button type="button" class="tab active" data-mode="divisions" id="viewModeDivisions">Class / Division</button>
+        <button type="button" class="tab" data-mode="classrooms" id="viewModeClassrooms">Classrooms</button>
+        <button type="button" class="tab" data-mode="labs" id="viewModeLabs">Labs</button>
+        <button type="button" class="tab" data-mode="teachers" id="viewModeTeachers">Teachers</button>
+      </div>
     </div>
 
     <section class="tabs" id="tabs" style="display:none"></section>
@@ -210,6 +221,15 @@
         violations above zero ranks below one with zero, regardless of soft cost.</p>
 
       <section class="tabs" id="compareTabs"></section>
+      <div class="view-mode-bar" id="compareViewModeBar" style="margin-top:14px;">
+        <span style="font-weight:600; font-size:13.5px; margin-right:4px; color:var(--muted);">View timetable:</span>
+        <div class="tabs view-type-tabs" style="margin-bottom:0;" id="compareViewTypeTabs">
+          <button type="button" class="tab active" data-mode="divisions" id="cmpViewModeDivisions">Class / Division</button>
+          <button type="button" class="tab" data-mode="classrooms" id="cmpViewModeClassrooms">Classrooms</button>
+          <button type="button" class="tab" data-mode="labs" id="cmpViewModeLabs">Labs</button>
+          <button type="button" class="tab" data-mode="teachers" id="cmpViewModeTeachers">Teachers</button>
+        </div>
+      </div>
       <section class="tabs" id="compareDivTabs"></section>
       <section id="compareGridArea"></section>
     </div>
@@ -312,7 +332,7 @@
     <h2>9. History</h2>
     <table class="tt history-table" id="historyTable">
       <thead>
-        <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th></tr>
+        <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th><th>Action</th></tr>
       </thead>
       <tbody id="historyBody"></tbody>
     </table>
@@ -320,6 +340,6 @@
 
 </main>
 
-<script src="/static/platform.js"></script>
+<script src="/static/platform.js?v=20261001_v3"></script>
 </body>
 </html>

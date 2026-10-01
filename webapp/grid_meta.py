@@ -60,7 +60,7 @@ def _entry_labels(meta: dict) -> dict:
 
 
 def annotate_grids(grids: dict, division_meta: dict) -> dict:
-    """Return `grids` with branch labels added to every division and every cell entry.
+    """Return `grids` with branch labels added to every division, classroom, lab, teacher, and cell entry.
 
     Mutates and returns the same object (it is freshly built per run and not shared). Entries keep
     their qualified `division_id`/`course` as the identity, and gain display fields alongside:
@@ -77,16 +77,16 @@ def annotate_grids(grids: dict, division_meta: dict) -> dict:
         # display name for the division tab: the bare 'D1', not the qualified engine id
         division["name"] = labels["division_name"] or unqualify(str(division.get("id", "")))
 
-        for entries in division.get("cells", {}).values():
-            for entry in entries:
-                # An entry's own division_id is authoritative (a cell can, in principle, be
-                # regrouped across divisions by a later view), so re-resolve per entry rather than
-                # inheriting the enclosing division's labels.
-                entry_meta = division_meta.get(entry.get("division_id"), meta)
-                entry.update(_entry_labels(entry_meta))
-                entry["course_code"] = unqualify(str(entry.get("course", "")))
-                entry["division_name"] = (
-                    entry_meta.get("division_name")
-                    or unqualify(str(entry.get("division_id", "")))
-                )
+    # Annotate entries across all entity categories
+    for group_key in ("divisions", "classrooms", "labs", "teachers", "rooms"):
+        for item in grids.get(group_key, []):
+            for entries in item.get("cells", {}).values():
+                for entry in entries:
+                    entry_meta = division_meta.get(entry.get("division_id"), {})
+                    entry.update(_entry_labels(entry_meta))
+                    entry["course_code"] = unqualify(str(entry.get("course", "")))
+                    entry["division_name"] = (
+                        entry_meta.get("division_name")
+                        or unqualify(str(entry.get("division_id", "")))
+                    )
     return grids

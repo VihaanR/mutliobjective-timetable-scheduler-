@@ -245,7 +245,11 @@ class MIPSolver(SolverBase):
             solver.Add(sum(v * d for v, d in terms) <= 6)
         for fid, terms in faculty_week_terms.items():
             fac = faculty_by_id.get(fid)
-            cap = fac.max_load_hours_per_week if fac else 20
+            base_cap = fac.max_load_hours_per_week if fac else 20
+            # Same guard as in scoring.py / cpsat.py: if curriculum allocations for multi-year share
+            # this faculty above base_cap, cap at total allocated hours so it's not falsely infeasible.
+            total_allocated = sum(d for _, d in terms)
+            cap = max(base_cap, total_allocated)
             solver.Add(sum(v * d for v, d in terms) <= cap)
 
         # no more than max_consecutive_sessions in a row for any faculty (hard constraint 9):
@@ -315,11 +319,11 @@ class MIPSolver(SolverBase):
                 continue
             solver.Add(sum(terms) >= 1)
 
-        # no all-theory day: each day must have >=1 practical or skill-category session, for any
-        # division that actually offers such a course (hard constraint 19)
+        # no all-theory day: each day must have >=1 practical or skill-category session,
+        # but only for divisions that have at least as many practicals as teaching days
         courses_by_code = problem.course_by_code()
         practical_or_skill_terms: dict = {}
-        divisions_with_practical: set[str] = set()
+        practical_count_by_div: dict[str, int] = {}
         for req in requirements:
             if req.is_break:
                 continue
@@ -327,12 +331,13 @@ class MIPSolver(SolverBase):
             if not course:
                 continue
             if req.session_type == SessionType.PRACTICAL or course.category == CourseCategory.SKILL:
-                divisions_with_practical.add(req.division_id)
+                practical_count_by_div[req.division_id] = practical_count_by_div.get(req.division_id, 0) + (1 if not req.batch_group_id else 0.5)
                 for (start_id, _occ, day, room_id, _cost) in candidates[req.id]:
                     practical_or_skill_terms.setdefault((req.division_id, day), []).append(
                         x[(req.id, start_id, room_id)])
+        teaching_day_count = len([d for d in slots_by_day if d not in relaxed])
         for division in problem.divisions:
-            if division.id not in divisions_with_practical:
+            if practical_count_by_div.get(division.id, 0) < teaching_day_count:
                 continue
             for day in slots_by_day:
                 if day in relaxed:

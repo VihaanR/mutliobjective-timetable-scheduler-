@@ -54,7 +54,14 @@ def room_options_for(req: SessionRequirement, problem: ProblemInstance,
             idx = members.index(req) if req in members else 0
             partitioned = [rid for i, rid in enumerate(labs) if i % 2 == idx % 2]
             return partitioned or list(labs)
-        return list(labs)
+    if req.room_type == "classroom" or req.room_type not in ("none", "lab"):
+        if classrooms and req.division_id:
+            div_ids = sorted([d.id for d in problem.divisions])
+            if req.division_id in div_ids:
+                idx = div_ids.index(req.division_id)
+                primary = classrooms[idx % len(classrooms)]
+                return [primary]
+        return list(classrooms)
     return list(classrooms)
 
 
@@ -65,6 +72,7 @@ def build_candidates(problem: ProblemInstance,
     groups = batch_group_members(requirements)
     faculty_by_id = problem.faculty_by_id()
     divisions_by_id = problem.division_by_id()
+    courses_by_code = problem.course_by_code()
     rooms_by_id = problem.room_by_id()
     out: dict[str, list[tuple[int, list[int], int, str]]] = {}
 
@@ -72,6 +80,8 @@ def build_candidates(problem: ProblemInstance,
         room_options = room_options_for(req, problem, groups)
         division = divisions_by_id.get(req.division_id)
         occupants = (division.student_count // 2) if (req.batch_id and division) else (division.student_count if division else 0)
+        course = courses_by_code.get(req.course_code)
+        is_oe = "OE" in req.course_code or (course and getattr(course, "category", None) == "open_elective")
         cands: list[tuple[int, list[int], int, str]] = []
         for day, day_slots in days.items():
             if req.fixed_day is not None and day != req.fixed_day:
@@ -82,6 +92,9 @@ def build_candidates(problem: ProblemInstance,
                     continue
                 # break must sit in the mid-day band: not first two periods, not last period
                 if req.is_break and (start_idx <= 1 or start_idx == len(day_slots) - 1):
+                    continue
+                # Open Elective must sit at the start of day (period 0) or end of day (period >= 5)
+                if is_oe and ts.period != 0 and ts.period < 5:
                     continue
                 # nothing may be scheduled into a blocked slot (disruption window); breaks are
                 # exempt (a blocked slot is simply untaught, which a break already represents)

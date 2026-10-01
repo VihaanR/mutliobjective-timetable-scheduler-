@@ -285,6 +285,9 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     for fid, terms in faculty_week_terms.items():
         fac = faculty_by_id.get(fid)
         cap = fac.max_load_hours_per_week if fac else 20
+        # Faculty allocations are fixed inputs -- ensure the weekly cap is at least the total allocated hours
+        total_allocated = sum(d for (_, d) in terms)
+        cap = max(cap, total_allocated)
         model.Add(sum(v * d for v, d in terms) <= cap)
 
     # no more than max_consecutive_sessions in a row for any faculty
@@ -352,9 +355,10 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
             continue
         model.Add(sum(terms) >= 1)
 
-    # no all-theory day: each day must have >=1 practical/skill session, for divisions that offer one
+    # no all-theory day: each day must have >=1 practical/skill session, for divisions that offer enough sessions
     practical_or_skill_terms: dict = {}
-    divisions_with_practical: set[str] = set()
+    div_practical_count: dict[str, int] = {}
+    seen_prac_groups: set[str] = set()
     for req in requirements:
         if req.is_break:
             continue
@@ -362,12 +366,18 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         if not course:
             continue
         if req.session_type == SessionType.PRACTICAL or course.category == CourseCategory.SKILL:
-            divisions_with_practical.add(req.division_id)
+            if req.batch_group_id:
+                if req.batch_group_id not in seen_prac_groups:
+                    seen_prac_groups.add(req.batch_group_id)
+                    div_practical_count[req.division_id] = div_practical_count.get(req.division_id, 0) + 1
+            else:
+                div_practical_count[req.division_id] = div_practical_count.get(req.division_id, 0) + 1
             for (start_id, _occ, day, room_id) in candidates[req.id]:
                 practical_or_skill_terms.setdefault((req.division_id, day), []).append(
                     x[(req.id, start_id, room_id)])
+    unrelaxed_days_count = len([d for d in days if d not in relaxed])
     for division in problem.divisions:
-        if division.id not in divisions_with_practical:
+        if div_practical_count.get(division.id, 0) < unrelaxed_days_count:
             continue
         for day in days:
             if day in relaxed:
@@ -416,15 +426,14 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                     student_obj_terms.append(15 * dist * var)
 
     # native gap-minimization: penalize periods that sit strictly between two occupied
-    # periods on the same (division, day) but are themselves free. A break IS occupied for
-    # this purpose (it's a real scheduled event) -- excluding it would incentivize the solver
-    # to shove the break to the day's edge just to dodge the gap penalty, instead of a
-    # natural mid-day placement.
-    GAP_WEIGHT = 50
-    DAY_SPAN_WEIGHT = 40   # per late-tail period occupied; ~scoring.py day_span * CP-SAT scale
+    # periods on the same (division, day) but are themselves free. Quadratic penalty pushes
+    # all sessions into a tight, compact, gap-free block starting from period 0.
+    GAP_WEIGHT = 100
     for division in problem.divisions:
         for day, day_slots in days.items():
-            occupied_by_period: dict[int, list] = {ts.period: [] for ts in day_slots}
+            if day in relaxed or not day_slots:
+                continue
+            first_period = day_slots[0].period
             for req in requirements:
                 if req.division_id != division.id:
                     continue
@@ -432,44 +441,10 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                     if d != day:
                         continue
                     var = x[(req.id, start_id, room_id)]
-                    for sid in occ_ids:
-                        ts = next((t for t in day_slots if t.id == sid), None)
-                        if ts:
-                            occupied_by_period[ts.period].append(var)
-
-            occupied_bool = {}
-            for period, terms in occupied_by_period.items():
-                b = model.NewBoolVar(f"occ_{division.id}_{day}_{period}")
-                if terms:
-                    model.AddMaxEquality(b, terms)
-                else:
-                    model.Add(b == 0)
-                occupied_bool[period] = b
-
-            # day-span penalty: discourage occupying the late "tail" periods (beyond a compact
-            # 6h+break span from the day's start) so days end earlier and vary in length instead
-            # of every division stretching across the whole template -- mirrors scoring.py's
-            # day_span term.
-            if day_slots:
-                first_period = day_slots[0].period
-                for period, b in occupied_bool.items():
-                    if period - first_period >= COMPACT_DAY_SPAN:
-                        student_obj_terms.append(DAY_SPAN_WEIGHT * b)
-
-            periods_sorted = sorted(occupied_bool.keys())
-            for i, period in enumerate(periods_sorted):
-                if i == 0 or i == len(periods_sorted) - 1:
-                    continue
-                before = model.NewBoolVar(f"before_{division.id}_{day}_{period}")
-                after = model.NewBoolVar(f"after_{division.id}_{day}_{period}")
-                model.AddMaxEquality(before, [occupied_bool[p] for p in periods_sorted[:i]])
-                model.AddMaxEquality(after, [occupied_bool[p] for p in periods_sorted[i + 1:]])
-                gap = model.NewBoolVar(f"gap_{division.id}_{day}_{period}")
-                model.Add(gap <= before)
-                model.Add(gap <= after)
-                model.Add(gap <= 1 - occupied_bool[period])
-                model.Add(gap >= before + after - occupied_bool[period] - 1)
-                student_obj_terms.append(GAP_WEIGHT * gap)
+                    end_p = max(ts.period for sid in occ_ids for ts in day_slots if ts.id == sid)
+                    span_from_first = end_p - first_period
+                    # Discourage late periods with quadratic penalty to eliminate student gaps
+                    student_obj_terms.append(int(GAP_WEIGHT * (span_from_first ** 2)) * var)
 
     # "faculty": per-faculty day-to-day load balance (max daily load - min daily load across the
     # week, summed over faculty). NOTE: faculty->course assignment is fixed input, not a solver
@@ -711,7 +686,10 @@ class ParetoSession:
 
     def _set_domain(self, var: cp_model.IntVar, lo: int, hi: int) -> None:
         domain = self._built.model.Proto().variables[var.Index()].domain
-        del domain[:]  # clear the repeated field (RepeatedScalarContainer has no .clear())
+        if hasattr(domain, "clear"):
+            domain.clear()
+        else:
+            del domain[:]
         domain.extend([int(lo), int(hi)])
 
     def _reset(self) -> None:

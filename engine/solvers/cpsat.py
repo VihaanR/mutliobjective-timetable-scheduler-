@@ -565,27 +565,34 @@ class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
 
     def on_solution_callback(self):
         self.solution_count += 1
-        if self.callback_fn:
-            try:
-                assignments: list[Assignment] = []
-                for req in self.built.requirements:
-                    for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
-                        if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
-                            assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
-                            break
-                cat_vals = {}
-                for category, terms in self.built.objective_categories.items():
-                    cat_vals[category] = int(sum(self.Value(t) for t in terms)) if terms else 0
-                sol = Solution(
-                    assignments=assignments,
-                    solver_name="cpsat",
-                    wall_clock_seconds=self.WallTime(),
-                    objective_value=self.ObjectiveValue(),
-                    status="FEASIBLE",
-                )
-                self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
-            except Exception:
-                pass
+        if not self.callback_fn:
+            return
+        try:
+            assignments: list[Assignment] = []
+            for req in self.built.requirements:
+                for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
+                    if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
+                        assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
+                        break
+            sol = Solution(
+                assignments=assignments,
+                solver_name="cpsat",
+                wall_clock_seconds=self.WallTime(),
+                objective_value=self.ObjectiveValue(),
+                status="FEASIBLE",
+            )
+            cat_vals = {}
+            for category, terms in self.built.objective_categories.items():
+                if not terms:
+                    cat_vals[category] = 0
+                else:
+                    try:
+                        cat_vals[category] = int(sum(self.Value(t) for t in terms))
+                    except Exception:
+                        cat_vals[category] = 0
+            self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
+        except Exception:
+            pass
 
 
 def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s: float,

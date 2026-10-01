@@ -123,6 +123,7 @@
       <button type="button" id="generateOddYearsBtn" style="background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(16,185,129,0.3);">⚡ Generate All Odd Semesters (Sem 3 + 5 + 7)</button>
       <button type="button" id="generateEvenYearsBtn" class="secondary">Generate All Even Semesters (Sem 4 + 6 + 8)</button>
       <button type="button" id="generateAllYearsBtn" class="secondary">Generate All Loaded</button>
+      <button type="button" id="genStopBtn" style="display:none; background:linear-gradient(135deg, #dc2626, #b91c1c); color:#fff; font-weight:600; border:none; border-radius:8px; padding:10px 16px; cursor:pointer;">🛑 Stop</button>
     </div>
     <p class="notes" id="genNote" style="margin-top: 10px;">CP-SAT solves all cross-year shared faculty and lab constraints simultaneously with zero clash and minimal student gaps.</p>
     <div class="status-line" id="genStatus"></div>
@@ -143,9 +144,9 @@
       <div class="control">
         <label>Objective Pairs (3D Rotating Tradeoff)</label>
         <div class="compare-checks">
-          <label><input type="checkbox" id="parFacStu" checked> Faculty vs Students</label>
-          <label><input type="checkbox" id="parFacLab" checked> Faculty vs Labs/Resource</label>
-          <label><input type="checkbox" id="parStuLab" checked> Students vs Labs/Resource</label>
+          <label><input type="checkbox" id="parStuFac" checked> 1st: Min Faculty (Bound Students)</label>
+          <label><input type="checkbox" id="parFacStu" checked> 2nd: Min Students (Bound Faculty)</label>
+          <label><input type="checkbox" id="parLabStu" checked> 3rd: Min Students (Bound Resource/Labs)</label>
         </div>
       </div>
       <div class="control">
@@ -154,9 +155,30 @@
       </div>
       <div class="control">
         <label>Time limit per solve (s)</label>
-        <input type="number" id="parTimeLimit" value="30" min="5" max="300" step="5">
+        <input type="number" id="parTimeLimit" value="240" min="5" max="1200" step="10">
       </div>
-      <button id="paretoStreamBtn" type="button">🚀 Start Live Multi-Objective Pareto Sweep</button>
+      <button id="paretoStreamBtn" type="button" style="background:linear-gradient(135deg,#003877,#1e40af); font-weight:700;">🚀 Start Live Multi-Objective Pareto Sweep</button>
+      <button id="paretoOddSemBtn" type="button" style="background:linear-gradient(135deg,#10b981,#059669); color:#fff; font-weight:600; box-shadow:0 4px 12px rgba(16,185,129,0.3);">⚡ Sweep Odd Semesters (3 + 5 + 7)</button>
+      <button id="paretoEvenSemBtn" type="button" class="secondary">Sweep Even Semesters (4 + 6 + 8)</button>
+      <button id="paretoSelectedBtn" type="button" class="secondary">Sweep Selected Class</button>
+      <button id="paretoStopBtn" type="button" style="display:none; background:linear-gradient(135deg,#dc2626,#b91c1c); color:#fff; font-weight:700; box-shadow:0 4px 12px rgba(220,38,38,0.3); border:none; border-radius:8px; padding:10px 18px; cursor:pointer;">🛑 Stop Sweep</button>
+    </div>
+
+    <!-- Live Streaming ETA Banner -->
+    <div id="paretoStreamBanner" class="pareto-stream-banner" style="display:none;">
+      <div class="stream-banner-left">
+        <div class="pareto-spinner-large"></div>
+        <div>
+          <div class="stream-banner-title" id="streamBannerTitle">Live Multi-Objective Optimization in Progress</div>
+          <div class="stream-banner-sub" id="streamBannerSub">Solving simultaneous Pareto frontier constraints &amp; streaming candidate assignments live…</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="stream-eta-badge" id="streamEtaBadge">
+          <span>⏱️</span> <span id="streamEtaText">Estimated Time: ~240s / point</span>
+        </div>
+        <button id="streamBannerStopBtn" type="button" style="background:#dc2626; color:#fff; font-weight:700; border:none; border-radius:8px; padding:7px 16px; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(220,38,38,0.4);">🛑 Stop Run</button>
+      </div>
     </div>
 
     <!-- 8-Step Architecture Stepper -->
@@ -195,7 +217,50 @@
       </div>
     </div>
 
-    <div class="status-line" id="paretoStatus">Ready to sweep. Click 'Start Live Multi-Objective Pareto Sweep' to stream live solves.</div>
+    <div class="status-line" id="paretoStatus">Ready to sweep. Click 'Start Live Multi-Objective Pareto Sweep' or choose Odd/Even Semesters.</div>
+
+    <!-- Scope Selection Modal Dialog -->
+    <div id="paretoScopeModal" class="pareto-scope-modal-backdrop" style="display:none;">
+      <div class="pareto-scope-card">
+        <div class="pareto-scope-header">
+          <h3>⚡ Select Semester Scope for Pareto Optimization</h3>
+          <p>Choose which semester datasets to include in the simultaneous CP-SAT Multi-Objective Pareto frontier sweep (240s per epsilon for optimality):</p>
+        </div>
+        <div class="pareto-options-grid">
+          <div class="pareto-scope-opt highlight-opt" id="optOddSem">
+            <div class="scope-opt-info">
+              <h4>⚡ All Odd Semesters (Sem 3 + 5 + 7)</h4>
+              <p>Solve cross-year shared faculty &amp; labs across odd academic terms (240s/solve for optimal convergence)</p>
+            </div>
+            <span class="scope-opt-badge">Recommended</span>
+          </div>
+          <div class="pareto-scope-opt" id="optEvenSem">
+            <div class="scope-opt-info">
+              <h4>All Even Semesters (Sem 4 + 6 + 8)</h4>
+              <p>Solve cross-year shared faculty &amp; labs across even academic terms (240s/solve for optimal convergence)</p>
+            </div>
+            <span class="scope-opt-badge">Even Term</span>
+          </div>
+          <div class="pareto-scope-opt" id="optSelectedClass">
+            <div class="scope-opt-info">
+              <h4>Selected Class Only (from Section 2)</h4>
+              <p>Target only the currently picked branch and semester (~10-30s estimated)</p>
+            </div>
+            <span class="scope-opt-badge">Single Class</span>
+          </div>
+          <div class="pareto-scope-opt" id="optAllLoaded">
+            <div class="scope-opt-info">
+              <h4>All Loaded Dataset Branches</h4>
+              <p>Simultaneous Pareto optimization for all currently loaded datasets</p>
+            </div>
+            <span class="scope-opt-badge">Global</span>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end;">
+          <button type="button" id="closeParetoScopeModalBtn" class="secondary" style="font-weight:600;">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Live Solver HUD Panel -->
     <div class="pareto-hud" id="paretoHud" style="display:none;">
@@ -204,8 +269,37 @@
           <span class="hud-title" id="hudTradeoffTitle">Current Tradeoff: Faculty vs Students</span>
           <div style="font-size:12.5px; color:#cbd5e1; margin-top:3px;" id="hudStepDesc">Solving Payoff Table bounds...</div>
         </div>
-        <span class="hud-status-badge" id="hudStatusBadge">Initializing CP-SAT</span>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="hud-status-badge" id="hudStatusBadge">Initializing CP-SAT</span>
+          <button id="hudStopBtn" type="button" style="background:#dc2626; color:#fff; font-weight:700; border:none; border-radius:6px; padding:5px 12px; cursor:pointer; font-size:12px;">🛑 Stop</button>
+        </div>
       </div>
+
+      <!-- Epsilon Range & Sequence Card -->
+      <div id="hudEpsRangeBox" style="background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <span style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">Epsilon Range for Active Pair:</span>
+          <span id="hudEpsRangeVal" style="font-size:13.5px; font-weight:700; color:#38bdf8; margin-left:8px;">[Tight: — ... Loose: —]</span>
+        </div>
+        <div>
+          <span style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700;">Grid (Loose &rarr; Tight):</span>
+          <span id="hudEpsGridVal" style="font-size:13px; font-weight:700; color:#fde047; margin-left:8px;">—</span>
+        </div>
+      </div>
+
+      <!-- Point Tracking Breakdown -->
+      <div id="hudPointsTrackingBox" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:12.5px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div>
+          <span style="color:#fdba74; font-weight:700;">⚡ Running ε:</span> <span id="hudRunningEpsBadge" style="font-weight:800; color:#fff; background:rgba(249,115,22,0.3); padding:2px 8px; border-radius:6px;">—</span>
+        </div>
+        <div>
+          <span style="color:#94a3b8; font-weight:600;">Remaining to Test:</span> <span id="hudRemainingListBadge" style="font-weight:700; color:#e2e8f0;">—</span>
+        </div>
+        <div>
+          <span style="color:#86efac; font-weight:600;">Completed in Pair:</span> <span id="hudCompletedListBadge" style="font-weight:700; color:#86efac;">None yet</span>
+        </div>
+      </div>
+
       <div class="hud-metrics">
         <div class="hud-metric highlight">
           <div class="val" id="hudEpsilonVal">—</div>
@@ -432,10 +526,17 @@
   </section>
 
   <section class="panel-section" id="historySection">
-    <h2>8. History</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+      <h2 style="margin:0;">8. Optimization &amp; Timetable History</h2>
+      <div class="tabs" style="margin-bottom:0;" id="historyFilterTabs">
+        <button type="button" class="tab active" id="histTabAll">All Records</button>
+        <button type="button" class="tab" id="histTabPareto">⚡ Multi-Objective Pareto Sweeps</button>
+        <button type="button" class="tab" id="histTabSingle">Single Solves</button>
+      </div>
+    </div>
     <table class="tt history-table" id="historyTable">
       <thead>
-        <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th><th>Action</th></tr>
+        <tr><th>ID</th><th>Type / Scope</th><th>Solver / Method</th><th>Status</th><th>Hard</th><th>Soft / Profile</th><th>Created</th><th>Action</th></tr>
       </thead>
       <tbody id="historyBody"></tbody>
     </table>
@@ -443,6 +544,6 @@
 
 </main>
 
-<script src="/static/platform.js?v=20261001_v4"></script>
+<script src="/static/platform.js?v=20261002_v3"></script>
 </body>
 </html>

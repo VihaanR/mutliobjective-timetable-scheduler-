@@ -394,3 +394,99 @@ table.history-table th { color: var(--muted); font-weight: 600; text-transform: 
 .scatter-plot-card h3 { margin: 0 0 12px; font-size: 15px; }
 .scatter-wrap { display: flex; justify-content: center; overflow-x: auto; padding: 10px 0; }
 
+/* Modal & Scope Selector for Pareto */
+.pareto-scope-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+  animation: fadeIn 0.2s ease-out;
+}
+.pareto-scope-card {
+  background: #ffffff; width: 90%; max-width: 580px; border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); border: 1px solid var(--line);
+  padding: 24px; position: relative; overflow: hidden;
+}
+.pareto-scope-header {
+  border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 18px;
+}
+.pareto-scope-header h3 {
+  margin: 0 0 6px; font-size: 18px; color: var(--accent, #003877); display: flex; align-items: center; gap: 8px;
+}
+.pareto-scope-header p {
+  margin: 0; font-size: 13px; color: var(--muted); line-height: 1.4;
+}
+.pareto-options-grid {
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;
+}
+.pareto-scope-opt {
+  display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
+  border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer; transition: all 0.2s ease;
+  background: var(--panel-2, #f8fafc); text-align: left;
+}
+.pareto-scope-opt:hover {
+  border-color: var(--accent-2, #f26d21); background: #fff7ed; transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(242, 109, 33, 0.12);
+}
+.pareto-scope-opt.highlight-opt {
+  border-color: #10b981; background: #f0fdf4;
+}
+.pareto-scope-opt.highlight-opt:hover {
+  border-color: #059669; background: #ecfdf5;
+}
+.scope-opt-info h4 {
+  margin: 0 0 4px; font-size: 14.5px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 6px;
+}
+.scope-opt-info p {
+  margin: 0; font-size: 12px; color: #64748b;
+}
+.scope-opt-badge {
+  font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 20px; text-transform: uppercase;
+  letter-spacing: 0.5px; background: #e2e8f0; color: #475569;
+}
+.pareto-scope-opt.highlight-opt .scope-opt-badge {
+  background: #10b981; color: #ffffff;
+}
+
+/* Streaming Progress & Spinner */
+.pareto-stream-banner {
+  background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff;
+  border-radius: 12px; padding: 14px 18px; margin: 14px 0;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  border-left: 4px solid var(--accent-2, #f26d21); box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+}
+.stream-banner-left {
+  display: flex; align-items: center; gap: 14px;
+}
+.pareto-spinner-large {
+  width: 28px; height: 28px; border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent-2, #f26d21); border-radius: 50%;
+  animation: spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.stream-banner-title {
+  font-size: 14px; font-weight: 700; color: #f8fafc;
+}
+.stream-banner-sub {
+  font-size: 12px; color: #94a3b8; margin-top: 2px;
+}
+.stream-eta-badge {
+  background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 6px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: #fdba74;
+  display: flex; align-items: center; gap: 6px;
+}
+
+/* Stop Run Buttons */
+#paretoStopBtn, #streamBannerStopBtn, #hudStopBtn, #genStopBtn {
+  transition: all 0.2s ease;
+}
+#paretoStopBtn:hover, #streamBannerStopBtn:hover, #hudStopBtn:hover, #genStopBtn:hover {
+  background: #b91c1c !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.5) !important;
+}
+#paretoStopBtn:active, #streamBannerStopBtn:active, #hudStopBtn:active, #genStopBtn:active {
+  transform: translateY(0);
+}
+
+

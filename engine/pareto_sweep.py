@@ -28,13 +28,13 @@ from engine.solvers.cpsat import CPSATSolver, ParetoSession
 from engine.view import solution_to_grids
 from webapp.grid_meta import annotate_grids
 
-DEFAULT_TIME_LIMIT_S = 30
+DEFAULT_TIME_LIMIT_S = 240
 DEFAULT_SWEEP_POINTS = 5
 
 DEFAULT_PAIRS: list[tuple[str, str]] = [
-    ("faculty", "students"),
-    ("faculty", "labs"),
-    ("students", "labs"),
+    ("students", "faculty"),  # 1st: Min faculty, bound student (student bound constraint)
+    ("faculty", "students"),  # 2nd: Min student, bound faculty (faculty bound constraint)
+    ("labs", "students"),     # 3rd: Min student, bound resource/labs (room balance)
 ]
 
 
@@ -64,7 +64,9 @@ class FrontierPoint:
 def _lexicographic_payoff(session: ParetoSession, bound_category: str, minimize_category: str,
                           time_limit_s: float,
                           warm_start: Solution | None,
-                          on_progress: Callable[[dict], None] | None = None) -> tuple[int, int, Solution]:
+                          on_progress: Callable[[dict], None] | None = None,
+                          problem: ProblemInstance | None = None,
+                          division_meta: dict | None = None) -> tuple[int, int, Solution]:
     """Lexicographic payoff table: the loose end of the epsilon range is the bound value at a
     lexicographic optimum of `minimize` (minimize it, then minimize `bound` holding it there). The
     non-lexicographic version took an arbitrary optimum of `minimize`, which can be weakly
@@ -75,31 +77,63 @@ def _lexicographic_payoff(session: ParetoSession, bound_category: str, minimize_
     twice. That first solve's solution has bound value `tight_end`, so it satisfies every epsilon
     on the grid and is returned as the always-feasible hint. Raises RuntimeError if any stage
     finds nothing."""
-    def value_of(category: str, result: tuple) -> int:
-        _sol, vals, _status = result
-        if vals[category] is None:
-            raise RuntimeError(
-                f"payoff table solve was infeasible for pair ({bound_category}, {minimize_category})")
-        return vals[category]
+    def emit_intermediate_sol(sol: Solution | None, vals: dict, stage_label: str):
+        if not on_progress or not sol or not problem or not sol.assignments:
+            return
+        try:
+            sol_grids = annotate_grids(solution_to_grids(sol, problem), division_meta or {})
+        except Exception:
+            sol_grids = None
+        fac, stu, res, tot = compute_3d_scores(vals)
+        on_progress({
+            "type": "intermediate",
+            "pair": f"{bound_category}<=eps,min={minimize_category}",
+            "stage": stage_label,
+            "epsilon": "Payoff",
+            "count": 1,
+            "wall_s": round(sol.wall_clock_seconds, 2),
+            "faculty_score": fac,
+            "student_score": stu,
+            "resource_score": res,
+            "total_penalty": tot,
+            "grids": sol_grids,
+        })
 
     if on_progress:
-        on_progress({"substep": "tight_end", "desc": f"Solving Tight End: Minimize {bound_category} alone..."})
+        on_progress({"type": "payoff_progress", "substep": "tight_end", "desc": f"Solving Tight End: Minimize {bound_category} alone..."})
     first = session.solve_unbounded(minimize=bound_category, time_limit_s=time_limit_s, hint=warm_start)
-    tight_end = value_of(bound_category, first)
+    first_val = first[1].get(bound_category)
+    if first_val is None:
+        first_val = 0
+    tight_end = first_val
+    emit_intermediate_sol(first[0], first[1], "Tight End Solution")
 
     if on_progress:
-        on_progress({"substep": "best_min", "desc": f"Solving Loose End Stage 1: Minimize {minimize_category} alone..."})
-    best = session.solve_unbounded(minimize=minimize_category, time_limit_s=time_limit_s, hint=first[0])
-    m_star = value_of(minimize_category, best)
+        on_progress({"type": "payoff_progress", "substep": "best_min", "desc": f"Solving Loose End Stage 1: Minimize {minimize_category} alone..."})
+    best = session.solve_unbounded(minimize=minimize_category, time_limit_s=time_limit_s, hint=first[0] or warm_start)
+    m_star = best[1].get(minimize_category)
+    emit_intermediate_sol(best[0], best[1], "Loose End Stage 1 Solution")
 
-    if on_progress:
-        on_progress({"substep": "loose_end", "desc": f"Solving Loose End Stage 2: Minimize {bound_category} with {minimize_category} fixed to {m_star}..."})
-    loose_solve = session.solve_unbounded(
-        minimize=bound_category, fix={minimize_category: m_star},
-        time_limit_s=time_limit_s, hint=best[0])
-    loose_end = value_of(bound_category, loose_solve)
+    loose_end = tight_end
+    if m_star is not None:
+        if on_progress:
+            on_progress({"type": "payoff_progress", "substep": "loose_end", "desc": f"Solving Loose End Stage 2: Minimize {bound_category} with {minimize_category} fixed to {m_star}..."})
+        loose_solve = session.solve_unbounded(
+            minimize=bound_category, fix={minimize_category: m_star},
+            time_limit_s=time_limit_s, hint=best[0])
+        loose_val = loose_solve[1].get(bound_category)
+        if loose_val is None:
+            loose_val = best[1].get(bound_category)
+        if loose_val is not None:
+            loose_end = max(tight_end, loose_val)
+        else:
+            loose_end = tight_end + 10
+        emit_intermediate_sol(loose_solve[0], loose_solve[1], "Loose End Stage 2 Solution")
+    else:
+        loose_end = tight_end + 10
 
-    return tight_end, loose_end, first[0]
+    hint_sol = first[0] or best[0] or warm_start
+    return tight_end, loose_end, hint_sol
 
 
 def _epsilon_grid(tight_end: int, loose_end: int, n: int) -> list[int]:
@@ -217,7 +251,8 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
                 time_limit_s: float, sweep_points: int,
                 warm_start: Solution | None,
                 division_meta: dict | None = None,
-                on_event: Callable[[dict], None] | None = None) -> tuple[list[FrontierPoint], Solution]:
+                on_event: Callable[[dict], None] | None = None,
+                cancel_event: Any | None = None) -> tuple[list[FrontierPoint], Solution]:
     """`sweep_pair`, returning a feasible solution for `sweep()` to seed the next pair with."""
     pair_label = f"{bound_category}<=eps,min={minimize_category}"
     session = ParetoSession(problem, bound_category, minimize_category)
@@ -227,10 +262,11 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
 
     def payoff_cb(data):
         if on_event:
-            on_event({"type": "payoff_progress", "pair": pair_label, **data})
+            on_event(data)
 
     tight_end, loose_end, tight_sol = _lexicographic_payoff(
-        session, bound_category, minimize_category, time_limit_s, warm_start, on_progress=payoff_cb)
+        session, bound_category, minimize_category, time_limit_s, warm_start,
+        on_progress=payoff_cb, problem=problem, division_meta=division_meta)
 
     grid = sorted(_epsilon_grid(tight_end, loose_end, sweep_points), reverse=True)  # loose -> tight
 
@@ -272,6 +308,8 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
     prev_sol, prev_bound = None, None
     i = 0
     while i < len(grid):
+        if cancel_event and cancel_event.is_set():
+            break
         epsilon = grid[i]
         hint = prev_sol if prev_bound is not None and prev_bound <= epsilon else tight_sol
 
@@ -283,6 +321,11 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
                 "point_index": i + 1,
                 "total_points": len(grid),
                 "remaining": len(grid) - i,
+                "remaining_list": grid[i:],
+                "completed_list": [p.epsilon for p in points],
+                "tight_end": tight_end,
+                "loose_end": loose_end,
+                "grid": grid,
             })
 
         def intermediate_cb(int_sol, int_vals, count, w_time):
@@ -305,6 +348,7 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
                     "resource_score": res,
                     "total_penalty": tot,
                     "grids": int_grids,
+                    "remaining_list": grid[i:],
                 })
 
         t0 = time.time()
@@ -327,6 +371,8 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
                 "epsilon": epsilon,
                 "point": asdict(pt),
                 "remaining": len(grid) - (i + 1),
+                "remaining_list": grid[(i + 1):],
+                "completed_list": [p.epsilon for p in points],
             })
 
         i += 1
@@ -351,6 +397,9 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
                         "pair": pair_label,
                         "epsilon": grid[i],
                         "point": asdict(bypass_pt),
+                        "remaining": len(grid) - (i + 1),
+                        "remaining_list": grid[(i + 1):],
+                        "completed_list": [p.epsilon for p in points],
                         "reason": f"AUGMECON2 bypass: actual bound {bound_value} <= {grid[i]}",
                     })
                 i += 1
@@ -382,172 +431,222 @@ def sweep_stream(problem: ProblemInstance,
                  pairs: list[tuple[str, str]] | None = None,
                  time_limit_s: float = DEFAULT_TIME_LIMIT_S,
                  sweep_points: int = DEFAULT_SWEEP_POINTS,
-                 division_meta: dict | None = None) -> Generator[dict, None, None]:
+                 division_meta: dict | None = None,
+                 cancel_event: Any | None = None) -> Generator[dict, None, None]:
     """Live streaming generator executing the 8-step End-to-End Multi-Objective Architecture."""
+    import queue
+    import threading
     from engine.solvers.greedy import GreedySolver
 
+    q: queue.Queue = queue.Queue()
+    SENTINEL = object()
     active_pairs = list(pairs or DEFAULT_PAIRS)
-    all_points: list[FrontierPoint] = []
-    payoff_tables: dict[str, dict] = {}
 
-    # Step 1: Initiated
-    yield {
-        "type": "step",
-        "step_num": 1,
-        "step_name": "User Initiates Pareto Optimization",
-        "status": "active",
-        "detail": {
-            "pairs": [list(p) for p in active_pairs],
-            "sweep_points": sweep_points,
-            "time_limit_s": time_limit_s,
-            "divisions_count": len(problem.divisions),
-            "faculty_count": len(problem.faculty),
-            "rooms_count": len(problem.rooms),
-            "slots_count": len(problem.slot_template.slots),
-        },
-    }
-
-    # Step 2: CP-SAT Model Construction
-    t_start = time.time()
-    warm_start = GreedySolver().solve(problem)
-    yield {
-        "type": "step",
-        "step_num": 2,
-        "step_name": "CP-SAT Model Construction",
-        "status": "active",
-        "detail": {
-            "hard_constraints": [
-                "Every session assigned exactly once",
-                "No faculty clash",
-                "No room clash",
-                "No division clash",
-                "Open Elective synchronized at H1",
-                "Honours courses placed at day boundaries",
-                "Sibling batch practical synchronization",
-            ],
-            "soft_penalty_variables": ["faculty_score", "student_score", "resource_score"],
-            "warm_start_wall_s": round(warm_start.wall_clock_seconds, 2),
-        },
-    }
-
-    # Execute sweeps across pairs
-    total_expected_points = len(active_pairs) * sweep_points
-    completed_points_count = 0
-
-    for pair_idx, (bound_cat, min_cat) in enumerate(active_pairs):
-        pair_label = f"{bound_cat}<=eps,min={min_cat}"
-
-        # Step 3 & 4 notification
-        yield {
-            "type": "step",
-            "step_num": 3,
-            "step_name": f"Payoff Table Calculation: ({bound_cat}, {min_cat})",
-            "status": "active",
-            "detail": {"pair": pair_label, "pair_index": pair_idx + 1, "total_pairs": len(active_pairs)},
-        }
-
-        pair_events: list[dict] = []
-
-        def capture_event(ev: dict):
-            pair_events.append(ev)
-
+    def worker():
         try:
-            pair_points, warm_start = _sweep_pair(
-                problem, bound_cat, min_cat, time_limit_s, sweep_points, warm_start,
-                division_meta=division_meta, on_event=capture_event,
-            )
-        except Exception as exc:
-            yield {"type": "pair_error", "pair": pair_label, "error": str(exc)}
-            continue
+            t_start = time.time()
+            all_points: list[FrontierPoint] = []
+            payoff_tables: dict[str, dict] = {}
+            total_expected_points = len(active_pairs) * sweep_points
+            completed_points_count = 0
 
-        for ev in pair_events:
-            ev_type = ev.get("type")
-            if ev_type == "payoff_done":
-                payoff_tables[pair_label] = {
-                    "tight_end": ev.get("tight_end"),
-                    "loose_end": ev.get("loose_end"),
-                    "grid": ev.get("grid"),
-                }
-                yield {
+            # Step 1: Initiated
+            q.put({
+                "type": "step",
+                "step_num": 1,
+                "step_name": "User Initiates Pareto Optimization",
+                "status": "active",
+                "detail": {
+                    "pairs": [list(p) for p in active_pairs],
+                    "sweep_points": sweep_points,
+                    "time_limit_s": time_limit_s,
+                    "divisions_count": len(problem.divisions),
+                    "faculty_count": len(problem.faculty),
+                    "rooms_count": len(problem.rooms),
+                    "slots_count": len(problem.time_slots),
+                },
+            })
+
+            # Step 2: CP-SAT Model Construction
+            warm_start = GreedySolver().solve(problem)
+            q.put({
+                "type": "step",
+                "step_num": 2,
+                "step_name": "CP-SAT Model Construction",
+                "status": "active",
+                "detail": {
+                    "hard_constraints": [
+                        "Every session assigned exactly once",
+                        "No faculty clash",
+                        "No room clash",
+                        "No division clash",
+                        "Open Elective synchronized at H1",
+                        "Honours courses placed at day boundaries",
+                        "Sibling batch practical synchronization",
+                    ],
+                    "soft_penalty_variables": ["faculty_score", "student_score", "resource_score"],
+                    "warm_start_wall_s": round(warm_start.wall_clock_seconds, 2),
+                },
+            })
+
+            # Emit initial warm start timetable
+            if warm_start and warm_start.assignments:
+                try:
+                    ws_grids = annotate_grids(solution_to_grids(warm_start, problem), division_meta or {})
+                    q.put({
+                        "type": "intermediate",
+                        "pair": "Initial Greedy Baseline",
+                        "stage": "Greedy Feasible Start",
+                        "epsilon": "Init",
+                        "count": 0,
+                        "wall_s": round(warm_start.wall_clock_seconds, 2),
+                        "faculty_score": None,
+                        "student_score": None,
+                        "resource_score": None,
+                        "total_penalty": None,
+                        "grids": ws_grids,
+                    })
+                except Exception:
+                    pass
+
+            # Execute sweeps across pairs
+            for pair_idx, (bound_cat, min_cat) in enumerate(active_pairs):
+                if cancel_event and cancel_event.is_set():
+                    break
+                pair_label = f"{bound_cat}<=eps,min={min_cat}"
+
+                # Step 3 notification
+                q.put({
                     "type": "step",
-                    "step_num": 4,
-                    "step_name": f"Epsilon Grid Generated for ({bound_cat}, {min_cat})",
+                    "step_num": 3,
+                    "step_name": f"Payoff Table Calculation: ({bound_cat}, {min_cat})",
+                    "status": "active",
+                    "detail": {"pair": pair_label, "pair_index": pair_idx + 1, "total_pairs": len(active_pairs)},
+                })
+
+                def on_event_handler(ev: dict):
+                    nonlocal completed_points_count
+                    ev_type = ev.get("type")
+                    if ev_type == "payoff_done":
+                        payoff_tables[pair_label] = {
+                            "tight_end": ev.get("tight_end"),
+                            "loose_end": ev.get("loose_end"),
+                            "grid": ev.get("grid"),
+                        }
+                        q.put(ev)
+                        q.put({
+                            "type": "step",
+                            "step_num": 4,
+                            "step_name": f"Epsilon Grid Generated for ({bound_cat}, {min_cat})",
+                            "status": "active",
+                            "detail": {
+                                "pair": pair_label,
+                                "tight_end": ev.get("tight_end"),
+                                "loose_end": ev.get("loose_end"),
+                                "grid": ev.get("grid"),
+                                "order": "Loose -> Tight (descending)",
+                            },
+                        })
+                    elif ev_type in ("point_done", "bypass"):
+                        completed_points_count += 1
+                        point_data = ev.get("point", {})
+                        point_data["id"] = len(all_points) + 1
+                        q.put({
+                            "type": "progress",
+                            "completed": completed_points_count,
+                            "total_expected": total_expected_points,
+                            "current_pair": pair_label,
+                            "current_epsilon": ev.get("epsilon"),
+                            "remaining_in_pair": ev.get("remaining", 0),
+                            "wall_elapsed_s": round(time.time() - t_start, 1),
+                        })
+                        q.put(ev)
+                    else:
+                        q.put(ev)
+
+                try:
+                    pair_points, warm_start = _sweep_pair(
+                        problem, bound_cat, min_cat, time_limit_s, sweep_points, warm_start,
+                        division_meta=division_meta, on_event=on_event_handler,
+                        cancel_event=cancel_event,
+                    )
+                    all_points.extend(pair_points)
+                except Exception as exc:
+                    q.put({"type": "pair_error", "pair": pair_label, "error": str(exc)})
+                    continue
+
+                q.put({
+                    "type": "step",
+                    "step_num": 6,
+                    "step_name": "Rotating Epsilon Across Objectives",
                     "status": "active",
                     "detail": {
-                        "pair": pair_label,
-                        "tight_end": ev.get("tight_end"),
-                        "loose_end": ev.get("loose_end"),
-                        "grid": ev.get("grid"),
-                        "order": "Loose -> Tight (descending)",
+                        "completed_pairs": pair_idx + 1,
+                        "total_pairs": len(active_pairs),
+                        "total_points_collected": len(all_points),
                     },
-                }
-            elif ev_type in ("point_done", "bypass"):
-                completed_points_count += 1
-                point_data = ev.get("point", {})
-                point_data["id"] = len(all_points) + 1
-                yield {
-                    "type": "progress",
-                    "completed": completed_points_count,
-                    "total_expected": total_expected_points,
-                    "current_pair": pair_label,
-                    "current_epsilon": ev.get("epsilon"),
-                    "remaining_in_pair": ev.get("remaining", 0),
-                    "wall_elapsed_s": round(time.time() - t_start, 1),
-                }
-            yield ev
+                })
 
-        all_points.extend(pair_points)
+            # Step 7: 3D Pareto Dominance Filtering
+            q.put({
+                "type": "step",
+                "step_num": 7,
+                "step_name": "Pareto Dominance Filtering",
+                "status": "active",
+                "detail": {
+                    "total_solutions": len(all_points),
+                    "criteria": ["hard_violations == 0", "Deduplication", "3D Dominance (f, s, r)"],
+                },
+            })
 
-        yield {
-            "type": "step",
-            "step_num": 6,
-            "step_name": "Rotating Epsilon Across Objectives",
-            "status": "active",
-            "detail": {
-                "completed_pairs": pair_idx + 1,
-                "total_pairs": len(active_pairs),
-                "total_points_collected": len(all_points),
-            },
-        }
+            pareto_filter_3d(all_points)
 
-    # Step 7: 3D Pareto Dominance Filtering
-    yield {
-        "type": "step",
-        "step_num": 7,
-        "step_name": "Pareto Dominance Filtering",
-        "status": "active",
-        "detail": {"total_solutions": len(all_points), "criteria": ["hard_violations == 0", "Deduplication", "3D Dominance (f, s, r)"]},
-    }
+            # Format points for UI
+            formatted_points: list[dict] = []
+            for idx, p in enumerate(all_points, start=1):
+                d = asdict(p)
+                d["id"] = idx
+                formatted_points.append(d)
 
-    pareto_filter_3d(all_points)
+            # Step 8: Multi-Criteria Decision Support & Profile Recommendations
+            recs = compute_recommendations(formatted_points)
 
-    # Format points for UI
-    formatted_points: list[dict] = []
-    for idx, p in enumerate(all_points, start=1):
-        d = asdict(p)
-        d["id"] = idx
-        formatted_points.append(d)
+            q.put({
+                "type": "step",
+                "step_num": 8,
+                "step_name": "Admin Decision Support & Interactive Frontier",
+                "status": "done",
+                "detail": {
+                    "total_points": len(formatted_points),
+                    "non_dominated_count": len([p for p in formatted_points if not p.get("dominated")]),
+                    "dominated_count": len([p for p in formatted_points if p.get("dominated")]),
+                    "recommendations": recs,
+                },
+            })
 
-    # Step 8: Multi-Criteria Decision Support & Profile Recommendations
-    recs = compute_recommendations(formatted_points)
+            q.put({
+                "type": "complete",
+                "points": formatted_points,
+                "payoff_tables": payoff_tables,
+                "recommendations": recs,
+                "total_wall_s": round(time.time() - t_start, 2),
+            })
+        except Exception as exc:
+            q.put({"type": "error", "error": str(exc)})
+        finally:
+            q.put(SENTINEL)
 
-    yield {
-        "type": "step",
-        "step_num": 8,
-        "step_name": "Admin Decision Support & Interactive Frontier",
-        "status": "done",
-        "detail": {
-            "total_points": len(formatted_points),
-            "non_dominated_count": len([p for p in formatted_points if not p.get("dominated")]),
-            "dominated_count": len([p for p in formatted_points if p.get("dominated")]),
-            "recommendations": recs,
-        },
-    }
+    th = threading.Thread(target=worker, daemon=True)
+    th.start()
 
-    yield {
-        "type": "complete",
-        "points": formatted_points,
-        "payoff_tables": payoff_tables,
-        "recommendations": recs,
-        "total_wall_s": round(time.time() - t_start, 2),
-    }
+    while True:
+        try:
+            item = q.get(timeout=0.1)
+            if item is SENTINEL:
+                break
+            yield item
+        except queue.Empty:
+            if not th.is_alive():
+                break
+            time.sleep(0.02)
+

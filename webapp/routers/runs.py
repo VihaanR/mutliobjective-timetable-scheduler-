@@ -186,7 +186,7 @@ def list_runs(session: Session = Depends(get_session), _=Depends(require_faculty
             "status": r.status,
             "hard": r.hard,
             "soft": r.soft,
-            "created_at": r.created_at,
+            "created_at": (r.created_at.isoformat() + "Z") if r.created_at else None,
             "branch_ids": r.branch_ids or [],
         }
         for r in runs
@@ -209,7 +209,7 @@ def get_run(run_id: int, session: Session = Depends(get_session), _=Depends(requ
         "grids": run.grids,
         "stage_reports": run.stage_reports,
         "error": run.error,
-        "created_at": run.created_at,
+        "created_at": (run.created_at.isoformat() + "Z") if run.created_at else None,
         "branch_ids": run.branch_ids or [],
     }
 

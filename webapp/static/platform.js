@@ -28,31 +28,64 @@ let paretoViewMode = "divisions";
 let paretoActiveDivision = 0;
 let activeProfile = "balanced";
 let paretoStreamAbortController = null;
+let paretoStopToken = null;  // server-issued token for explicit stop via /api/pareto/stop
+
+// Safe element listener helper
+function on(id, event, handler) {
+  const el = $(id);
+  if (el) el.addEventListener(event, handler);
+}
 
 // Event listeners
-$("seedBtn").addEventListener("click", loadSeed);
-$("branchRefreshBtn").addEventListener("click", () => loadBranches());
-$("deptSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
-$("yearSelect").addEventListener("change", () => { rebuildClassSelectors(); checkReadiness(); });
-$("semSelect").addEventListener("change", () => { renderResolvedBranch(); checkReadiness(); });
-$("generateBtn").addEventListener("click", () => generate("selected"));
-const oddBtn = $("generateOddYearsBtn");
-if (oddBtn) oddBtn.addEventListener("click", () => generate("odd"));
-const evenBtn = $("generateEvenYearsBtn");
-if (evenBtn) evenBtn.addEventListener("click", () => generate("even"));
-$("generateAllYearsBtn").addEventListener("click", () => generate("all"));
-$("compareBtn").addEventListener("click", runCompare);
-$("adjustBtn").addEventListener("click", adjust);
-$("restoreBtn").addEventListener("click", restoreOriginal);
-$("paretoStreamBtn").addEventListener("click", startParetoStreaming);
-$("saveParetoRunBtn").addEventListener("click", saveSelectedParetoAsRun);
+on("loadSeedBtn", "click", loadSeed);
+on("seedBtn", "click", loadSeed);
+on("refreshBranchesBtn", "click", () => loadBranches());
+on("branchRefreshBtn", "click", () => loadBranches());
 
-$("btnFacultyFriendly").addEventListener("click", () => setPriorityProfile("faculty_friendly"));
-$("btnBalanced").addEventListener("click", () => setPriorityProfile("balanced"));
-$("btnStudentFriendly").addEventListener("click", () => setPriorityProfile("student_friendly"));
+on("deptSelect", "change", () => { rebuildClassSelectors(); checkReadiness(); });
+on("yearSelect", "change", () => { rebuildClassSelectors(); checkReadiness(); });
+on("semSelect", "change", () => { renderResolvedBranch(); checkReadiness(); });
 
-$("adjScope").addEventListener("change", () => {
-  $("adjFromWrap").style.display = $("adjScope").value === "from" ? "" : "none";
+on("generateBtn", "click", () => generate("selected"));
+on("generateOddYearsBtn", "click", () => generate("odd"));
+on("generateEvenYearsBtn", "click", () => generate("even"));
+on("generateAllYearsBtn", "click", () => generate("all"));
+
+// Pareto section button listeners
+on("paretoStreamBtn", "click", openParetoScopeModal);
+on("paretoOddSemBtn", "click", () => startParetoStreaming("odd"));
+on("paretoEvenSemBtn", "click", () => startParetoStreaming("even"));
+on("paretoSelectedBtn", "click", () => startParetoStreaming("selected"));
+on("paretoStopBtn", "click", stopParetoStreaming);
+on("streamBannerStopBtn", "click", stopParetoStreaming);
+on("hudStopBtn", "click", stopParetoStreaming);
+on("genStopBtn", "click", stopGenerate);
+
+// Modal scope options
+on("optOddSem", "click", () => startParetoStreaming("odd"));
+on("optEvenSem", "click", () => startParetoStreaming("even"));
+on("optSelectedClass", "click", () => startParetoStreaming("selected"));
+on("optAllLoaded", "click", () => startParetoStreaming("all"));
+on("closeParetoScopeModalBtn", "click", closeParetoScopeModal);
+
+on("saveParetoRunBtn", "click", saveSelectedParetoAsRun);
+
+// Profile buttons
+on("btnFacultyFriendly", "click", () => setPriorityProfile("faculty_friendly"));
+on("btnBalanced", "click", () => setPriorityProfile("balanced"));
+on("btnStudentFriendly", "click", () => setPriorityProfile("student_friendly"));
+
+on("compareBtn", "click", runCompare);
+on("adjustBtn", "click", adjust);
+on("restoreBtn", "click", restoreOriginal);
+
+on("histTabAll", "click", () => setHistoryFilter("all"));
+on("histTabPareto", "click", () => setHistoryFilter("pareto"));
+on("histTabSingle", "click", () => setHistoryFilter("single"));
+
+on("adjScope", "change", () => {
+  const fromWrap = $("adjFromWrap");
+  if (fromWrap) fromWrap.style.display = $("adjScope").value === "from" ? "" : "none";
 });
 
 // View mode tabs for single result timetable
@@ -96,36 +129,45 @@ async function loadSeedDatasets() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const datasets = await res.json();
     const sel = $("seedDataset");
-    sel.innerHTML = datasets.map((d) => `<option value="${d.name}">${d.name} — ${d.branch_code}</option>`).join("");
-    $("seedStatus").textContent = `${datasets.length} dataset(s) available to load.`;
+    if (sel) sel.innerHTML = datasets.map((d) => `<option value="${d.name}">${d.name} — ${d.branch_code}</option>`).join("");
+    const statusEl = $("seedStatus");
+    if (statusEl) statusEl.textContent = `${datasets.length} dataset(s) available to load.`;
   } catch (e) {
-    $("seedStatus").textContent = "backend not reachable — start the server on port 8750.";
+    const statusEl = $("seedStatus");
+    if (statusEl) statusEl.textContent = "backend not reachable — start the server on port 8750.";
   }
 }
 
 async function loadSeed() {
-  const btn = $("seedBtn");
-  const dataset = $("seedDataset").value;
-  if (!dataset) { $("seedStatus").textContent = "no dataset selected."; return; }
-  btn.disabled = true;
-  $("seedStatus").textContent = `loading "${dataset}"…`;
+  const btn = $("loadSeedBtn") || $("seedBtn");
+  const sel = $("seedDataset");
+  const dataset = sel ? sel.value : "";
+  const statusEl = $("seedStatus");
+  if (!dataset) {
+    if (statusEl) statusEl.textContent = "no dataset selected.";
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.textContent = `loading "${dataset}"…`;
   try {
     const res = await fetch(`/api/seed/${encodeURIComponent(dataset)}`, { method: "POST" });
     if (res.status === 409) {
-      $("seedStatus").textContent = `"${dataset}" already loaded — continuing.`;
+      if (statusEl) statusEl.textContent = `"${dataset}" already loaded — continuing.`;
     } else if (!res.ok) {
       const text = await res.text();
-      $("seedStatus").textContent = `error (HTTP ${res.status}) — ${text.slice(0, 200)}`;
+      if (statusEl) statusEl.textContent = `error (HTTP ${res.status}) — ${text.slice(0, 200)}`;
     } else {
       const data = await res.json();
-      $("seedStatus").textContent =
-        `loaded: ${data.divisions} divisions, ${data.faculty} faculty, ${data.courses} courses, ` +
-        `${data.rooms} rooms, ${data.slots} slots (branch ${data.branch_code}).`;
+      if (statusEl) {
+        statusEl.textContent =
+          `loaded: ${data.divisions} divisions, ${data.faculty} faculty, ${data.courses} courses, ` +
+          `${data.rooms} rooms, ${data.slots} slots (branch ${data.branch_code}).`;
+      }
     }
   } catch (e) {
-    $("seedStatus").textContent = "backend not reachable — start the server on port 8750.";
+    if (statusEl) statusEl.textContent = "backend not reachable — start the server on port 8750.";
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
     await loadBranches();
     checkReadiness();
   }
@@ -299,6 +341,9 @@ async function generate(mode = "selected") {
     branch_ids,
   };
 
+  const stopBtn = $("genStopBtn");
+  if (stopBtn) stopBtn.style.display = "inline-flex";
+
   statusEl.className = "status-line active-gen";
   statusEl.innerHTML = `<div class="gen-spinner"></div> <span>Generating timetable for <b>${label}</b> (${payload.solver}). Solving simultaneous constraints…</span>`;
 
@@ -312,6 +357,7 @@ async function generate(mode = "selected") {
       statusEl.className = "status-line";
       statusEl.textContent = "a solve is already in progress — wait for it to finish.";
       [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (stopBtn) stopBtn.style.display = "none";
       return;
     }
     if (!res.ok) {
@@ -320,6 +366,7 @@ async function generate(mode = "selected") {
       statusEl.className = "status-line";
       statusEl.textContent = "generation failed: " + msg;
       [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (stopBtn) stopBtn.style.display = "none";
       return;
     }
     const data = await res.json();
@@ -329,6 +376,23 @@ async function generate(mode = "selected") {
     statusEl.className = "status-line";
     statusEl.textContent = "error submitting run: " + (e.message || e);
     [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+    if (stopBtn) stopBtn.style.display = "none";
+  }
+}
+
+function stopGenerate() {
+  clearTimeout(pollTimer);
+  const btn = $("generateBtn");
+  const oddB = $("generateOddYearsBtn");
+  const evenB = $("generateEvenYearsBtn");
+  const allB = $("generateAllYearsBtn");
+  const stopBtn = $("genStopBtn");
+  [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+  if (stopBtn) stopBtn.style.display = "none";
+  const statusEl = $("genStatus");
+  if (statusEl) {
+    statusEl.className = "status-line";
+    statusEl.textContent = "Generation polling stopped by user.";
   }
 }
 
@@ -337,6 +401,7 @@ function pollRun(runId, label) {
   const oddB = $("generateOddYearsBtn");
   const evenB = $("generateEvenYearsBtn");
   const allB = $("generateAllYearsBtn");
+  const stopBtn = $("genStopBtn");
   const statusEl = $("genStatus");
 
   fetch(`/api/runs/${runId}`)
@@ -349,6 +414,7 @@ function pollRun(runId, label) {
         return;
       }
       [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+      if (stopBtn) stopBtn.style.display = "none";
       statusEl.className = "status-line";
       if (run.status === "done") {
         statusEl.textContent = `loaded run #${runId} (${label}).`;
@@ -380,6 +446,7 @@ function pollRun(runId, label) {
       statusEl.className = "status-line";
       statusEl.textContent = "error polling run: " + (e.message || e);
       [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+      if (stopBtn) stopBtn.style.display = "none";
     });
 }
 
@@ -561,9 +628,9 @@ function enableExport(runId) {
 // ---------------------------------------------------------------- 5. Multi-Objective Pareto & Epsilon Streaming
 function selectedParetoPairs() {
   const pairs = [];
-  if ($("parFacStu").checked) pairs.push(["faculty", "students"]);
-  if ($("parFacLab").checked) pairs.push(["faculty", "labs"]);
-  if ($("parStuLab").checked) pairs.push(["students", "labs"]);
+  if ($("parFacStu") && $("parFacStu").checked) pairs.push(["faculty", "students"]);
+  if ($("parStuFac") && $("parStuFac").checked) pairs.push(["students", "faculty"]);
+  if ($("parLabStu") && $("parLabStu").checked) pairs.push(["labs", "students"]);
   return pairs;
 }
 
@@ -585,33 +652,108 @@ function updateStepper(activeStepNum) {
   }
 }
 
-async function startParetoStreaming() {
-  const btn = $("paretoStreamBtn");
+function openParetoScopeModal() {
+  const modal = $("paretoScopeModal");
+  if (modal) modal.style.display = "flex";
+}
+
+function closeParetoScopeModal() {
+  const modal = $("paretoScopeModal");
+  if (modal) modal.style.display = "none";
+}
+
+let paretoTimerInterval = null;
+
+async function startParetoStreaming(mode = "odd") {
+  closeParetoScopeModal();
+
   const pairs = selectedParetoPairs();
   if (pairs.length === 0) {
     $("paretoStatus").textContent = "pick at least one objective pair.";
     return;
   }
 
-  btn.disabled = true;
+  const sweepPoints = parseInt($("parSweepPoints").value, 10) || 7;
+  const timeLimitPerSolve = parseFloat($("parTimeLimit").value) || 240;
+
+  // Resolve target branches
+  let branch_ids = null;
+  let label = "All Loaded Datasets";
+
+  if (mode === "selected") {
+    const b = selectedBranch();
+    if (!b) {
+      $("paretoStatus").textContent = "no class selected — pick one in step 2.";
+      return;
+    }
+    branch_ids = [b.id];
+    label = `${b.code} (${b.semester_label || 'Sem ' + b.semester})`;
+  } else if (mode === "odd") {
+    const oddBranches = allBranches.filter(b => [1, 3, 5, 7].includes(b.semester));
+    if (oddBranches.length === 0) {
+      $("paretoStatus").textContent = "no odd-semester datasets loaded. Please load odd semester datasets in step 1.";
+      return;
+    }
+    branch_ids = oddBranches.map(b => b.id);
+    const sems = [...new Set(oddBranches.map(b => b.semester))].sort();
+    label = `All Odd Semesters (Sem ${sems.join(" + ")})`;
+  } else if (mode === "even") {
+    const evenBranches = allBranches.filter(b => [2, 4, 6, 8].includes(b.semester));
+    if (evenBranches.length === 0) {
+      $("paretoStatus").textContent = "no even-semester datasets loaded. Please load even semester datasets in step 1.";
+      return;
+    }
+    branch_ids = evenBranches.map(b => b.id);
+    const sems = [...new Set(evenBranches.map(b => b.semester))].sort();
+    label = `All Even Semesters (Sem ${sems.join(" + ")})`;
+  } else {
+    branch_ids = null;
+    label = `All Loaded (${allBranches.length} classes)`;
+  }
+
+  // Calculate estimated solve time
+  const estSeconds = Math.max(30, Math.round(pairs.length * sweepPoints * Math.min(timeLimitPerSolve, 10)));
+  const startTime = Date.now();
+
+  const allBtns = [
+    $("paretoStreamBtn"), $("paretoOddSemBtn"), $("paretoEvenSemBtn"), $("paretoSelectedBtn")
+  ];
+  allBtns.forEach(b => { if (b) b.disabled = true; });
+
+  const stopBtns = [$("paretoStopBtn"), $("streamBannerStopBtn"), $("hudStopBtn")];
+  stopBtns.forEach(b => { if (b) b.style.display = "inline-flex"; });
+
   $("paretoLiveBadge").style.display = "inline-flex";
   $("paretoHud").style.display = "block";
   $("paretoLiveTimetableWrap").style.display = "block";
   $("paretoResultWrap").style.display = "block";
   $("paretoRecBox").style.display = "none";
-  $("paretoStatus").textContent = "Connecting live SSE multi-objective stream…";
+  $("paretoStreamBanner").style.display = "flex";
+
+  $("streamBannerTitle").innerHTML = `⚡ Live Multi-Objective Pareto Optimization &middot; <b>${label}</b>`;
+  $("streamBannerSub").textContent = `Solving simultaneous CP-SAT multi-objective model (Time limit: ${timeLimitPerSolve}s/point for optimality). Streaming candidate assignments live across ${pairs.length} tradeoff pair(s)…`;
+  $("streamEtaText").textContent = `Solving with ${timeLimitPerSolve}s limit per point`;
+  $("paretoStatus").textContent = `Initializing live multi-objective stream for ${label}…`;
+
+  if (paretoTimerInterval) clearInterval(paretoTimerInterval);
+  paretoTimerInterval = setInterval(() => {
+    const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+    $("hudElapsedVal").textContent = `${elapsedSec}s`;
+    $("streamEtaText").textContent = `Elapsed: ${elapsedSec}s (Target: Optimal Convergence @ ${timeLimitPerSolve}s/point)`;
+  }, 200);
 
   paretoPoints = [];
   paretoPayoffTables = {};
   paretoRecommendations = {};
   selectedParetoPointId = null;
+  paretoStopToken = null;
   updateStepper(1);
 
   const payload = {
     pairs,
-    time_limit_s: parseFloat($("parTimeLimit").value) || 30,
-    sweep_points: parseInt($("parSweepPoints").value, 10) || 7,
-    branch_ids: getSelectedBranchIds(),
+    time_limit_s: timeLimitPerSolve,
+    sweep_points: sweepPoints,
+    branch_ids,
   };
 
   try {
@@ -628,8 +770,11 @@ async function startParetoStreaming() {
     if (response.status === 400) {
       const err = await response.json();
       $("paretoStatus").textContent = "not ready: " + (err.detail ? (Array.isArray(err.detail) ? err.detail.join("; ") : err.detail) : "Validation failed");
-      btn.disabled = false;
+      allBtns.forEach(b => { if (b) b.disabled = false; });
+      stopBtns.forEach(b => { if (b) b.style.display = "none"; });
       $("paretoLiveBadge").style.display = "none";
+      $("paretoStreamBanner").style.display = "none";
+      if (paretoTimerInterval) clearInterval(paretoTimerInterval);
       return;
     }
     if (!response.ok) throw new Error("HTTP " + response.status);
@@ -660,48 +805,129 @@ async function startParetoStreaming() {
       }
     }
 
-    $("paretoStatus").textContent = "Multi-Objective Pareto sweep complete! Non-dominated frontier identified.";
-    btn.disabled = false;
+    if (paretoTimerInterval) clearInterval(paretoTimerInterval);
+    const finalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    $("paretoStatus").textContent = `Multi-Objective Pareto sweep complete in ${finalElapsed}s! Non-dominated frontier identified.`;
+    $("streamEtaText").textContent = `Finished in ${finalElapsed}s`;
+    allBtns.forEach(b => { if (b) b.disabled = false; });
+    stopBtns.forEach(b => { if (b) b.style.display = "none"; });
     $("paretoLiveBadge").style.display = "none";
     updateStepper(8);
   } catch (err) {
+    if (paretoTimerInterval) clearInterval(paretoTimerInterval);
     if (err.name !== "AbortError") {
       $("paretoStatus").textContent = "Stream error: " + (err.message || err);
-      btn.disabled = false;
+      allBtns.forEach(b => { if (b) b.disabled = false; });
+      stopBtns.forEach(b => { if (b) b.style.display = "none"; });
       $("paretoLiveBadge").style.display = "none";
+      $("paretoStreamBanner").style.display = "none";
     }
   }
 }
 
+function stopParetoStreaming() {
+  // 1. Abort the fetch (closes SSE connection from browser side)
+  if (paretoStreamAbortController) {
+    paretoStreamAbortController.abort();
+    paretoStreamAbortController = null;
+  }
+  // 2. Call the server-side stop endpoint using the session token (reliable kill)
+  if (paretoStopToken) {
+    fetch("/api/pareto/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: paretoStopToken }),
+    }).catch(() => {});
+    paretoStopToken = null;
+  }
+  if (paretoTimerInterval) {
+    clearInterval(paretoTimerInterval);
+    paretoTimerInterval = null;
+  }
+  const allBtns = [
+    $("paretoStreamBtn"), $("paretoOddSemBtn"), $("paretoEvenSemBtn"), $("paretoSelectedBtn")
+  ];
+  allBtns.forEach(b => { if (b) b.disabled = false; });
+  const stopBtns = [$("paretoStopBtn"), $("streamBannerStopBtn"), $("hudStopBtn")];
+  stopBtns.forEach(b => { if (b) b.style.display = "none"; });
+
+  $("paretoLiveBadge").style.display = "none";
+  $("streamBannerTitle").innerHTML = `🛑 Multi-Objective Optimization Stopped`;
+  $("streamBannerSub").textContent = `Sweep halted by user. Preserving all candidate timetables and Pareto points explored so far.`;
+  $("streamEtaText").textContent = `Stopped`;
+  $("paretoStatus").textContent = `Multi-objective optimization stopped. ${paretoPoints.length} point(s) available to inspect.`;
+  $("hudStatusBadge").textContent = "Stopped by User";
+
+  if (paretoPoints.length > 0) {
+    renderParetoUnifiedResults();
+    renderRecommendationBox();
+  }
+}
+
 function handleParetoStreamEvent(ev) {
-  if (ev.type === "step") {
+  if (ev.type === "token") {
+    // Store server-issued stop token for explicit cancellation
+    paretoStopToken = ev.token;
+    return;
+  } else if (ev.type === "step") {
     updateStepper(ev.step_num);
     $("hudStepDesc").textContent = ev.step_name;
     $("paretoStatus").textContent = `Step ${ev.step_num}/8: ${ev.step_name}…`;
   } else if (ev.type === "payoff_start") {
     $("hudTradeoffTitle").textContent = `Current Tradeoff: ${ev.pair}`;
     $("hudStatusBadge").textContent = "Calculating Payoff Table (Tight & Loose End)";
+    const rangeBox = $("hudEpsRangeVal");
+    if (rangeBox) rangeBox.textContent = `Solving bounds for ${ev.pair}...`;
   } else if (ev.type === "payoff_progress") {
     $("hudStepDesc").textContent = ev.desc || "Solving Payoff bounds...";
   } else if (ev.type === "payoff_done") {
     paretoPayoffTables[ev.pair] = { tight_end: ev.tight_end, loose_end: ev.loose_end, grid: ev.grid };
     $("hudStepDesc").textContent = `Payoff bounds: Tight=${ev.tight_end}, Loose=${ev.loose_end}. Grid: [${(ev.grid || []).join(", ")}]`;
+    const rangeBox = $("hudEpsRangeVal");
+    if (rangeBox) rangeBox.textContent = `[Tight: ${ev.tight_end} ... Loose: ${ev.loose_end}]`;
+    const gridBox = $("hudEpsGridVal");
+    if (gridBox) gridBox.textContent = `[${(ev.grid || []).join(", ")}]`;
   } else if (ev.type === "point_start") {
     $("hudEpsilonVal").textContent = ev.epsilon;
     $("hudRemainingVal").textContent = ev.remaining;
     $("hudTradeoffTitle").textContent = `Current Tradeoff: ${ev.pair}`;
     $("hudStatusBadge").textContent = `Testing ε = ${ev.epsilon} (Point ${ev.point_index}/${ev.total_points})`;
+
+    const runEps = $("hudRunningEpsBadge");
+    if (runEps) runEps.textContent = `ε = ${ev.epsilon} (Point ${ev.point_index}/${ev.total_points})`;
+
+    const remList = $("hudRemainingListBadge");
+    if (remList) {
+      remList.textContent = ev.remaining_list && ev.remaining_list.length > 0 ? `[${ev.remaining_list.join(", ")}] (${ev.remaining} left)` : "Final point";
+    }
+    const compList = $("hudCompletedListBadge");
+    if (compList) {
+      compList.textContent = ev.completed_list && ev.completed_list.length > 0 ? `[${ev.completed_list.join(", ")}] (${ev.completed_list.length} done)` : "None yet";
+    }
+
+    if (ev.tight_end !== undefined && ev.loose_end !== undefined) {
+      const rangeBox = $("hudEpsRangeVal");
+      if (rangeBox) rangeBox.textContent = `[Tight: ${ev.tight_end} ... Loose: ${ev.loose_end}]`;
+    }
   } else if (ev.type === "progress") {
     $("hudElapsedVal").textContent = `${ev.wall_elapsed_s}s`;
     $("hudEpsilonVal").textContent = ev.current_epsilon ?? "—";
     $("hudRemainingVal").textContent = ev.remaining_in_pair ?? "—";
   } else if (ev.type === "intermediate") {
-    $("hudFacVal").textContent = ev.faculty_score ?? "—";
-    $("hudStuVal").textContent = ev.student_score ?? "—";
-    $("hudResVal").textContent = ev.resource_score ?? "—";
-    $("hudStatusBadge").textContent = `Live CP-SAT Search (Sol #${ev.count})`;
+    if (ev.faculty_score !== null && ev.faculty_score !== undefined) $("hudFacVal").textContent = ev.faculty_score;
+    if (ev.student_score !== null && ev.student_score !== undefined) $("hudStuVal").textContent = ev.student_score;
+    if (ev.resource_score !== null && ev.resource_score !== undefined) $("hudResVal").textContent = ev.resource_score;
+
+    $("hudStatusBadge").textContent = `⚡ Live CP-SAT Candidate (Sol #${ev.count || 1} • ${ev.stage || 'Searching'})`;
+
+    if (ev.remaining_list && $("hudRemainingListBadge")) {
+      $("hudRemainingListBadge").textContent = `[${ev.remaining_list.join(", ")}]`;
+    }
+
     if (ev.grids) {
       paretoGrids = ev.grids;
+      $("paretoLiveTimetableWrap").style.display = "block";
+      $("paretoTtTitle").innerHTML = `⚡ Live Streaming Timetable (${ev.pair || ''} &middot; ε = <b>${ev.epsilon || '—'}</b> &middot; Fac: ${ev.faculty_score ?? '—'}, Stu: ${ev.student_score ?? '—'})`;
       renderParetoTabs();
       renderParetoGrid();
     }
@@ -714,9 +940,17 @@ function handleParetoStreamEvent(ev) {
       $("hudStuVal").textContent = pt.student_score ?? "—";
       $("hudResVal").textContent = pt.resource_score ?? "—";
 
+      if (ev.remaining_list && $("hudRemainingListBadge")) {
+        $("hudRemainingListBadge").textContent = ev.remaining_list.length > 0 ? `[${ev.remaining_list.join(", ")}]` : "Done";
+      }
+      if (ev.completed_list && $("hudCompletedListBadge")) {
+        $("hudCompletedListBadge").textContent = `[${ev.completed_list.join(", ")}] (${ev.completed_list.length} done)`;
+      }
+
       if (pt.grids) {
         paretoGrids = pt.grids;
         selectedParetoPointId = pt.id;
+        $("paretoLiveTimetableWrap").style.display = "block";
         $("paretoTtTitle").innerHTML = `⚡ Epsilon Timetable <b>Point #${pt.id}</b> (ε = ${pt.epsilon}, Fac: ${pt.faculty_score}, Stu: ${pt.student_score}, Res: ${pt.resource_score})`;
         renderParetoTabs();
         renderParetoGrid();
@@ -1103,6 +1337,73 @@ function restoreOriginal() {
 }
 
 // ---------------------------------------------------------------- 8. history
+let historyFilterMode = "all"; // "all" | "pareto" | "single"
+let cachedSingleRuns = [];
+let cachedParetoRuns = [];
+
+function formatIST(dateVal) {
+  if (!dateVal) return "—";
+  let s = String(dateVal);
+  if (s.includes("T") && !s.endsWith("Z") && !s.includes("+") && !s.includes("-", 10)) {
+    s += "Z";
+  }
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return dateVal;
+  return d.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }) + " IST";
+}
+
+function setHistoryFilter(mode) {
+  historyFilterMode = mode;
+  $("histTabAll").classList.toggle("active", mode === "all");
+  $("histTabPareto").classList.toggle("active", mode === "pareto");
+  $("histTabSingle").classList.toggle("active", mode === "single");
+  renderHistoryTable();
+}
+
+async function loadSavedParetoRun(runId, autoScroll = true) {
+  try {
+    const res = await fetch(`/api/pareto/${runId}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    if (data.points && data.points.length > 0) {
+      paretoPoints = data.points;
+      paretoPayoffTables = data.payoff_tables || {};
+      paretoRecommendations = data.recommendations || {};
+
+      const istTime = formatIST(data.created_at);
+      $("paretoHud").style.display = "block";
+      $("paretoLiveTimetableWrap").style.display = "block";
+      $("paretoResultWrap").style.display = "block";
+      if ($("hudTradeoffTitle")) $("hudTradeoffTitle").textContent = `Loaded Pareto Sweep #${runId} · ${data.label || ""} (${istTime})`;
+      if ($("hudStatusBadge")) $("hudStatusBadge").textContent = `Loaded Run #${runId} (${paretoPoints.length} points)`;
+      if ($("paretoStatus")) $("paretoStatus").textContent = `Loaded Pareto Sweep #${runId} generated at ${istTime}: ${paretoPoints.length} frontier solutions available to explore and inspect.`;
+
+      const recId = paretoRecommendations.profiles ? paretoRecommendations.profiles.balanced : paretoPoints[0].id;
+      selectParetoPoint(recId || paretoPoints[0].id);
+      renderParetoUnifiedResults();
+      renderRecommendationBox();
+      updateStepper(8);
+
+      if (autoScroll) {
+        $("paretoSection").scrollIntoView({ behavior: "smooth" });
+      }
+    } else {
+      alert(`Pareto Run #${runId} contains no solution points.`);
+    }
+  } catch (e) {
+    alert("Failed to load Pareto run: " + (e.message || e));
+  }
+}
+
 async function loadSavedRun(runId, autoScroll = true) {
   try {
     const res = await fetch(`/api/runs/${runId}`);
@@ -1110,7 +1411,8 @@ async function loadSavedRun(runId, autoScroll = true) {
     const run = await res.json();
     if (run.status === "done" && run.grids) {
       const badge = $("activeRunBadge");
-      if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${run.label || "Saved Timetable"}</b> (${run.solver})`;
+      const istTime = formatIST(run.created_at);
+      if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${run.label || "Saved Timetable"}</b> (${run.solver}) &middot; <span style="color:#64748b; font-size:12px;">🕒 Generated: ${istTime}</span>`;
       renderSummary(run);
       renderStages(run.stage_reports);
       currentGrids = run.grids;
@@ -1137,34 +1439,104 @@ async function loadSavedRun(runId, autoScroll = true) {
 
 async function loadHistory() {
   try {
-    const res = await fetch("/api/runs");
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const runs = await res.json();
-    const body = $("historyBody");
-    body.innerHTML = "";
-    runs.forEach((r) => {
-      const tr = document.createElement("tr");
-      tr.style.cursor = "pointer";
-      tr.title = `Click to load Run #${r.id} timetable`;
-      const created = (() => {
-        const d = new Date(r.created_at);
-        return isNaN(d.getTime()) ? r.created_at : d.toLocaleString();
-      })();
-      tr.innerHTML = `<td><b>#${r.id}</b></td><td>${r.label || ""}</td><td>${r.solver}</td>` +
-        `<td><span class="badge ${r.status === "done" ? (r.hard === 0 ? "badge-success" : "badge-warning") : "badge-danger"}">${r.status}</span></td>` +
-        `<td><b>${r.hard ?? ""}</b></td><td>${r.soft ? Number(r.soft).toFixed(1) : ""}</td><td>${created}</td>` +
-        `<td><button type="button" class="dash-edit-btn" style="color:var(--accent); font-weight:600; cursor:pointer; padding:3px 10px;">👁️ Load</button></td>`;
-      tr.addEventListener("click", () => loadSavedRun(r.id, true));
-      body.appendChild(tr);
-    });
+    const [runsRes, paretoRes] = await Promise.all([
+      fetch("/api/runs").catch(() => null),
+      fetch("/api/pareto/runs").catch(() => null),
+    ]);
 
-    if (!currentGrids && runs.length > 0) {
-      const bestRun = runs.find(r => r.status === "done" && r.hard === 0) || runs.find(r => r.status === "done");
+    cachedSingleRuns = runsRes && runsRes.ok ? await runsRes.json() : [];
+    cachedParetoRuns = paretoRes && paretoRes.ok ? await paretoRes.json() : [];
+
+    renderHistoryTable();
+
+    if (!currentGrids && cachedSingleRuns.length > 0) {
+      const bestRun = cachedSingleRuns.find(r => r.status === "done" && r.hard === 0) || cachedSingleRuns.find(r => r.status === "done");
       if (bestRun) loadSavedRun(bestRun.id, false);
     }
   } catch (e) {
     // history best-effort
   }
+}
+
+function renderHistoryTable() {
+  const body = $("historyBody");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const items = [];
+  if (historyFilterMode === "all" || historyFilterMode === "single") {
+    cachedSingleRuns.forEach(r => {
+      items.push({
+        kind: "single",
+        id: r.id,
+        label: r.label || "Single Timetable",
+        solver: r.solver,
+        status: r.status,
+        hard: r.hard,
+        soft: r.soft !== null && r.soft !== undefined ? Number(r.soft).toFixed(1) : "—",
+        created_at: r.created_at,
+      });
+    });
+  }
+
+  if (historyFilterMode === "all" || historyFilterMode === "pareto") {
+    cachedParetoRuns.forEach(r => {
+      items.push({
+        kind: "pareto",
+        id: r.id,
+        label: r.label || "Multi-Objective Pareto Sweep",
+        solver: `CP-SAT Multi-Objective (${r.points_count || 0} solutions)`,
+        status: r.status,
+        hard: "0 (Clash-Free)",
+        soft: `${r.points_count || 0} Frontier Pts`,
+        created_at: r.created_at,
+      });
+    });
+  }
+
+  items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+  if (items.length === 0) {
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:20px;">No runs in history.</td></tr>`;
+    return;
+  }
+
+  items.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = r.kind === "pareto" ? `Click to inspect Pareto Run #${r.id}` : `Click to load Run #${r.id} timetable`;
+    const created = formatIST(r.created_at);
+
+    const isPareto = r.kind === "pareto";
+    const typePill = isPareto
+      ? `<span class="badge" style="background:linear-gradient(135deg,#003877,#1e40af); color:#fff; font-weight:700;">⚡ Multi-Objective Sweep</span>`
+      : `<span class="badge" style="background:var(--panel-2); color:var(--text); font-weight:600;">Single Timetable</span>`;
+
+    const actionBtn = isPareto
+      ? `<button type="button" class="dash-edit-btn" style="background:linear-gradient(135deg,#f97316,#ea580c); color:#fff; font-weight:700; cursor:pointer; padding:4px 10px; border-radius:6px; border:none;">⚡ View Pareto (${r.soft})</button>`
+      : `<button type="button" class="dash-edit-btn" style="color:var(--accent); font-weight:600; cursor:pointer; padding:3px 10px;">👁️ Load</button>`;
+
+    tr.innerHTML = `
+      <td><b>#${r.id}</b></td>
+      <td>${typePill} <span style="font-weight:600; margin-left:4px;">${esc(r.label)}</span></td>
+      <td>${esc(r.solver)}</td>
+      <td><span class="badge ${r.status === "done" ? "badge-success" : (r.status === "queued" ? "badge-warning" : "badge-danger")}">${r.status}</span></td>
+      <td><b>${r.hard ?? "—"}</b></td>
+      <td>${r.soft}</td>
+      <td>${created}</td>
+      <td>${actionBtn}</td>
+    `;
+
+    tr.addEventListener("click", () => {
+      if (isPareto) {
+        loadSavedParetoRun(r.id, true);
+      } else {
+        loadSavedRun(r.id, true);
+      }
+    });
+
+    body.appendChild(tr);
+  });
 }
 
 // ---------------------------------------------------------------- Auth nav

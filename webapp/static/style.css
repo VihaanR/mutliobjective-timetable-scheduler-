@@ -297,3 +297,100 @@ table.history-table th { color: var(--muted); font-weight: 600; text-transform: 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* -------------------------------------------------------------- Multi-Objective Pareto & Epsilon Suite */
+.pareto-header-box {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 14px; border-bottom: 1px solid var(--line); padding-bottom: 12px;
+}
+.pareto-header-box h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.live-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px;
+  background: #fef2f2; border: 1px solid #f87171; color: #dc2626; font-size: 12px; font-weight: 700;
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #dc2626;
+  box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); animation: pulse-live 1.6s infinite;
+}
+@keyframes pulse-live {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+
+.pareto-stepper {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;
+  margin: 16px 0 20px;
+}
+.step-node {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; font-size: 12px; transition: all 0.25s ease; position: relative;
+}
+.step-node .step-num {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: var(--muted);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.step-node .step-title { font-weight: 700; margin-top: 4px; color: var(--text); line-height: 1.3; }
+.step-node.active {
+  background: #eff6ff; border-color: #3b82f6; box-shadow: 0 0 0 1px #3b82f6 inset, 0 4px 12px rgba(59,130,246,0.15);
+}
+.step-node.active .step-num { color: #2563eb; }
+.step-node.active .step-title { color: #1d4ed8; }
+.step-node.done {
+  background: #f0fdf4; border-color: #86efac;
+}
+.step-node.done .step-num { color: #16a34a; }
+
+.pareto-hud {
+  background: #0f172a; color: #f8fafc; border-radius: 14px; padding: 20px;
+  margin: 18px 0; box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.3);
+}
+.hud-top {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 12px; margin-bottom: 16px;
+}
+.hud-title { font-size: 14px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #94a3b8; }
+.hud-status-badge {
+  background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; color: #60a5fa;
+  padding: 4px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+}
+.hud-metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px;
+}
+.hud-metric {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px; padding: 12px 14px;
+}
+.hud-metric .val { font-size: 22px; font-weight: 800; color: #fff; font-family: monospace; }
+.hud-metric .lbl { font-size: 11px; text-transform: uppercase; color: #94a3b8; margin-top: 4px; }
+.hud-metric.highlight .val { color: #fb923c; }
+
+.pareto-recommendation-box {
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  border: 2px solid #f59e0b; border-radius: 12px; padding: 18px; margin: 18px 0;
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+}
+.rec-left h3 { margin: 0 0 6px; font-size: 16px; color: #92400e; display: flex; align-items: center; gap: 8px; }
+.rec-left p { margin: 0; font-size: 13.5px; color: #78350f; line-height: 1.5; }
+.rec-badge {
+  background: #f59e0b; color: #fff; font-weight: 800; font-size: 11px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 6px; letter-spacing: 0.5px;
+}
+.priority-btn-group {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+}
+.priority-btn {
+  padding: 8px 14px; border: 1px solid #d97706; background: #fff; color: #92400e;
+  border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+}
+.priority-btn.active {
+  background: #d97706; color: #fff; box-shadow: 0 4px 10px rgba(217, 119, 6, 0.3);
+}
+
+.scatter-plot-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 18px; margin: 18px 0;
+}
+.scatter-plot-card h3 { margin: 0 0 12px; font-size: 15px; }
+.scatter-wrap { display: flex; justify-content: center; overflow-x: auto; padding: 10px 0; }
+

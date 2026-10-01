@@ -555,9 +555,42 @@ class CPSATSolver(SolverBase):
         return _solve_and_decode(built, problem, time_limit_s, warm_start, extra_solver_params, start_time)
 
 
+class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
+    def __init__(self, built: _BuiltModel, problem: ProblemInstance, callback_fn=None):
+        super().__init__()
+        self.built = built
+        self.problem = problem
+        self.callback_fn = callback_fn
+        self.solution_count = 0
+
+    def on_solution_callback(self):
+        self.solution_count += 1
+        if self.callback_fn:
+            try:
+                assignments: list[Assignment] = []
+                for req in self.built.requirements:
+                    for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
+                        if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
+                            assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
+                            break
+                cat_vals = {}
+                for category, terms in self.built.objective_categories.items():
+                    cat_vals[category] = int(sum(self.Value(t) for t in terms)) if terms else 0
+                sol = Solution(
+                    assignments=assignments,
+                    solver_name="cpsat",
+                    wall_clock_seconds=self.WallTime(),
+                    objective_value=self.ObjectiveValue(),
+                    status="FEASIBLE",
+                )
+                self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
+            except Exception:
+                pass
+
+
 def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s: float,
                        warm_start: Solution | None, extra_solver_params: dict | None,
-                       start_time: float) -> tuple[Solution, dict[str, int | None]]:
+                       start_time: float, solution_callback=None) -> tuple[Solution, dict[str, int | None]]:
     model, x, requirements, candidates = built.model, built.x, built.requirements, built.candidates
 
     if warm_start is not None:
@@ -603,7 +636,8 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
     if extra_solver_params:
         for key, value in extra_solver_params.items():
             setattr(solver.parameters, key, value)
-    status = solver.Solve(model)
+    cb = _IntermediateCallback(built, problem, solution_callback) if solution_callback else None
+    status = solver.Solve(model, cb) if cb else solver.Solve(model)
     elapsed = time.time() - start_time
 
     status_map = {
@@ -731,16 +765,17 @@ class ParetoSession:
         model.Proto().solution_hint.values.extend(values)
         return True
 
-    def _run(self, time_limit_s: float, hint: Solution | None) -> tuple[Solution, dict[str, int | None], str]:
+    def _run(self, time_limit_s: float, hint: Solution | None, solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
         start = time.time()
         if hint is not None and self._complete_hint(hint, min(_HINT_COMPLETION_S, time_limit_s)):
             hint = None  # the complete hint is on the model; don't let the partial one be added too
         remaining = max(time_limit_s - (time.time() - start), 1.0)
-        sol, vals = _solve_and_decode(self._built, self._problem, remaining, hint, None, start)
+        sol, vals = _solve_and_decode(self._built, self._problem, remaining, hint, None, start, solution_callback=solution_callback)
         return sol, vals, sol.status
 
     def solve(self, epsilon: int, time_limit_s: float,
-              hint: Solution | None = None) -> tuple[Solution, dict[str, int | None], str]:
+              hint: Solution | None = None,
+              solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
         """AUGMECON2 point: `bound <= epsilon`, minimize `minimize`, slack-augmented so the result
         is strictly (not weakly) Pareto-optimal -- same objective as `solve_pareto_point()`.
         Returns `(Solution, category_values, status_name)`."""
@@ -752,11 +787,12 @@ class ParetoSession:
         self._set_domain(self._slack, 0, max(epsilon, 0))
         scale = max(epsilon, 0) + 1
         self._built.model.Minimize(scale * self._vals[self._minimize_category] - self._slack)
-        return self._run(time_limit_s, hint)
+        return self._run(time_limit_s, hint, solution_callback=solution_callback)
 
     def solve_unbounded(self, minimize: str, fix: dict[str, int] | None = None,
                         time_limit_s: float = 30,
-                        hint: Solution | None = None) -> tuple[Solution, dict[str, int | None], str]:
+                        hint: Solution | None = None,
+                        solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
         """Payoff-table solve: epsilon bound off, minimize `minimize`, with each category in `fix`
         pinned to its value (the lexicographic second stage). Only this session's two categories
         may be minimized or fixed."""
@@ -767,4 +803,4 @@ class ParetoSession:
         for category, value in (fix or {}).items():
             self._set_domain(self._vals[category], value, value)
         self._built.model.Minimize(self._vals[minimize])
-        return self._run(time_limit_s, hint)
+        return self._run(time_limit_s, hint, solution_callback=solution_callback)

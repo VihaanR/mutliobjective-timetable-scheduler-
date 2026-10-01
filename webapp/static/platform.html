@@ -4,30 +4,27 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DJ Sanghvi Timetable Platform</title>
-<link rel="stylesheet" href="/static/style.css?v=20261001_v3">
+<link rel="stylesheet" href="/static/style.css?v=20261001_v4">
 <style>
-  /* Compare-solvers panel (kept local to this page per the theme-migration freeze on style.css;
-     reuses existing classes/vars — .panel-section, .controls, .control, .tab, .tt, .stat-val,
-     .status-line, .notes — so the pending theme rewrite applies here automatically). */
   .compare-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
   .compare-checks label {
     display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13.5px;
     cursor: pointer; color: var(--text);
   }
-  #compareBtn {
+  #compareBtn, #paretoStreamBtn {
     padding: 11px 22px; border: none; border-radius: 10px; cursor: pointer;
-    font-size: 14px; font-weight: 700; color: var(--bg);
+    font-size: 14px; font-weight: 700; color: #fff;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 4px 14px rgba(0, 56, 119, 0.25);
+    transition: all 0.2s ease;
   }
-  #compareBtn:disabled { opacity: .5; cursor: not-allowed; }
+  #compareBtn:disabled, #paretoStreamBtn:disabled { opacity: .5; cursor: not-allowed; }
   .compare-badge {
     display: inline-block; margin-left: 6px; padding: 2px 9px; border-radius: 20px;
     font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
     background: transparent; border: 1px solid var(--good); color: var(--good);
   }
   tr.compare-winner td:first-child { border-left: 3px solid var(--good); padding-left: 7px; }
-  /* Branch caveat alert (Branch.notice) -- deliberately louder than .readiness-banner: this
-     flags a KNOWN GAP in what is being modelled, which a successful-looking solve would hide. */
   .branch-alert {
     margin-top: 14px; padding: 12px 14px; border-radius: 8px;
     background: #fdecea; border: 1px solid #d93025; border-left: 5px solid #d93025;
@@ -37,6 +34,7 @@
   .branch-alert .alert-head { font-weight: 700; display: block; margin-bottom: 4px; }
   #compareResultWrap { margin-top: 16px; }
   #compareDivTabs { margin-top: -6px; }
+  .point-selected-row { background: rgba(242, 109, 33, 0.12) !important; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -78,7 +76,7 @@
       </div>
       <button id="seedBtn">Load dataset</button>
     </div>
-    <div class="status-line" id="seedStatus">checking available datasets…</div>
+    <div class="status-line" id="seedStatus">4 dataset(s) available to load.</div>
   </section>
 
   <section class="panel-section" id="branchSection">
@@ -101,15 +99,7 @@
       <button type="button" id="branchRefreshBtn" class="secondary">Refresh</button>
     </div>
     <div class="status-line" id="branchResolved"></div>
-    <!-- Known-caveat alerts for the selected branch(es) -- Branch.notice, e.g. Sem VII's
-         missing OJT division. Rendered here (before Generate) so the caveat is read BEFORE a
-         plausible-looking timetable is produced, not discovered afterwards. -->
     <div id="branchNotices"></div>
-  </section>
-
-  <section class="panel-section" id="readySection">
-    <h2>3. Readiness</h2>
-    <div class="readiness-banner" id="readyBanner">checking…</div>
   </section>
 
   <section class="panel-section" id="genSection">
@@ -118,7 +108,7 @@
       <div class="control">
         <label>Solver Engine</label>
         <select id="solver">
-          <option value="cpsat" selected>CP-SAT (Google OR-Tools) — Optimal & Clash-Free</option>
+          <option value="cpsat" selected>CP-SAT (Google OR-Tools) — Optimal &amp; Clash-Free</option>
           <option value="pipeline">Hybrid Pipeline (Greedy &rarr; MIP &rarr; GA &rarr; CP-SAT)</option>
           <option value="greedy">Greedy — Instant Preview</option>
           <option value="mip">MIP (Mixed-Integer Programming)</option>
@@ -138,9 +128,161 @@
     <div class="status-line" id="genStatus"></div>
   </section>
 
+  <section class="panel-section" id="paretoSection">
+    <div class="pareto-header-box">
+      <div>
+        <h2>Multi-Objective Optimization (Epsilon-Constraint &amp; Pareto Frontier)</h2>
+        <p class="notes" style="margin-top:4px;">NEP-Aligned Multi-Objective Timetable Optimization System &middot; 3D Rotating Epsilon &amp; AUGMECON2 Pareto Frontier</p>
+      </div>
+      <div id="paretoLiveBadge" class="live-pill" style="display:none;">
+        <span class="live-dot"></span> LIVE SOLVER STREAM
+      </div>
+    </div>
+
+    <div class="controls" style="flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+      <div class="control">
+        <label>Objective Pairs (3D Rotating Tradeoff)</label>
+        <div class="compare-checks">
+          <label><input type="checkbox" id="parFacStu" checked> Faculty vs Students</label>
+          <label><input type="checkbox" id="parFacLab" checked> Faculty vs Labs/Resource</label>
+          <label><input type="checkbox" id="parStuLab" checked> Students vs Labs/Resource</label>
+        </div>
+      </div>
+      <div class="control">
+        <label>Sweep Points (N per pair)</label>
+        <input type="number" id="parSweepPoints" value="7" min="3" max="15" step="1">
+      </div>
+      <div class="control">
+        <label>Time limit per solve (s)</label>
+        <input type="number" id="parTimeLimit" value="30" min="5" max="300" step="5">
+      </div>
+      <button id="paretoStreamBtn" type="button">🚀 Start Live Multi-Objective Pareto Sweep</button>
+    </div>
+
+    <!-- 8-Step Architecture Stepper -->
+    <div class="pareto-stepper" id="paretoStepper">
+      <div class="step-node" id="stepNode1">
+        <div class="step-num">Step 1 <span class="step-icon">○</span></div>
+        <div class="step-title">Initiate Sweep</div>
+      </div>
+      <div class="step-node" id="stepNode2">
+        <div class="step-num">Step 2 <span class="step-icon">○</span></div>
+        <div class="step-title">CP-SAT Model</div>
+      </div>
+      <div class="step-node" id="stepNode3">
+        <div class="step-num">Step 3 <span class="step-icon">○</span></div>
+        <div class="step-title">Payoff Table</div>
+      </div>
+      <div class="step-node" id="stepNode4">
+        <div class="step-num">Step 4 <span class="step-icon">○</span></div>
+        <div class="step-title">Epsilon Grid</div>
+      </div>
+      <div class="step-node" id="stepNode5">
+        <div class="step-num">Step 5 <span class="step-icon">○</span></div>
+        <div class="step-title">Epsilon Solves</div>
+      </div>
+      <div class="step-node" id="stepNode6">
+        <div class="step-num">Step 6 <span class="step-icon">○</span></div>
+        <div class="step-title">Rotate 3D Tradeoffs</div>
+      </div>
+      <div class="step-node" id="stepNode7">
+        <div class="step-num">Step 7 <span class="step-icon">○</span></div>
+        <div class="step-title">Dominance Filter</div>
+      </div>
+      <div class="step-node" id="stepNode8">
+        <div class="step-num">Step 8 <span class="step-icon">○</span></div>
+        <div class="step-title">Decision Support</div>
+      </div>
+    </div>
+
+    <div class="status-line" id="paretoStatus">Ready to sweep. Click 'Start Live Multi-Objective Pareto Sweep' to stream live solves.</div>
+
+    <!-- Live Solver HUD Panel -->
+    <div class="pareto-hud" id="paretoHud" style="display:none;">
+      <div class="hud-top">
+        <div>
+          <span class="hud-title" id="hudTradeoffTitle">Current Tradeoff: Faculty vs Students</span>
+          <div style="font-size:12.5px; color:#cbd5e1; margin-top:3px;" id="hudStepDesc">Solving Payoff Table bounds...</div>
+        </div>
+        <span class="hud-status-badge" id="hudStatusBadge">Initializing CP-SAT</span>
+      </div>
+      <div class="hud-metrics">
+        <div class="hud-metric highlight">
+          <div class="val" id="hudEpsilonVal">—</div>
+          <div class="lbl">Current Epsilon (&epsilon;)</div>
+        </div>
+        <div class="hud-metric">
+          <div class="val" id="hudRemainingVal">—</div>
+          <div class="lbl">Values Remaining To Test</div>
+        </div>
+        <div class="hud-metric">
+          <div class="val" id="hudFacVal">—</div>
+          <div class="lbl">Faculty Penalty</div>
+        </div>
+        <div class="hud-metric">
+          <div class="val" id="hudStuVal">—</div>
+          <div class="lbl">Student Penalty</div>
+        </div>
+        <div class="hud-metric">
+          <div class="val" id="hudResVal">—</div>
+          <div class="lbl">Resource Penalty</div>
+        </div>
+        <div class="hud-metric">
+          <div class="val" id="hudElapsedVal">0.0s</div>
+          <div class="lbl">Elapsed Time</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live / Selected Timetable Stream Viewer -->
+    <div id="paretoLiveTimetableWrap" style="display:none; margin-top:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:16px;" id="paretoTtTitle">⚡ Live Epsilon Timetable Stream</h3>
+        <div class="view-mode-bar" style="margin:0;">
+          <span style="font-weight:600; font-size:13.5px; margin-right:4px; color:var(--muted);">View:</span>
+          <div class="tabs view-type-tabs" style="margin-bottom:0;" id="paretoViewTypeTabs">
+            <button type="button" class="tab active" data-mode="divisions" id="parViewModeDivisions">Class / Division</button>
+            <button type="button" class="tab" data-mode="classrooms" id="parViewModeClassrooms">Classrooms</button>
+            <button type="button" class="tab" data-mode="labs" id="parViewModeLabs">Labs</button>
+            <button type="button" class="tab" data-mode="teachers" id="parViewModeTeachers">Teachers</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="tabs" id="paretoTabs"></section>
+      <section id="paretoGridArea"></section>
+
+      <section class="legend" style="display:flex; margin-top:10px;">
+        <span class="legend-item"><span class="chip theory"></span> Theory</span>
+        <span class="legend-item"><span class="chip lab"></span> Lab (2h, batch-split)</span>
+        <span class="legend-item"><span class="chip tut"></span> Tutorial</span>
+        <span class="legend-item"><span class="chip brk"></span> Break</span>
+      </section>
+    </div>
+
+    <!-- Pareto Recommendations & Decision Support -->
+    <div class="pareto-recommendation-box" id="paretoRecBox" style="display:none;">
+      <div class="rec-left">
+        <h3><span class="rec-badge">Recommended</span> Best Tradeoff Timetable <span id="recPointIdBadge" style="font-weight:700;">#—</span></h3>
+        <p id="recDesc">Optimized for institution balance with normalized score <b id="recScoreVal">—</b>.</p>
+        <div class="priority-btn-group">
+          <button type="button" class="priority-btn" data-profile="faculty_friendly" id="btnFacultyFriendly">👨‍🏫 Faculty Friendly (0.8 / 0.2 / 0.0)</button>
+          <button type="button" class="priority-btn active" data-profile="balanced" id="btnBalanced">⚖️ Balanced (0.33 / 0.33 / 0.34)</button>
+          <button type="button" class="priority-btn" data-profile="student_friendly" id="btnStudentFriendly">🎓 Student Friendly (0.2 / 0.8 / 0.0)</button>
+        </div>
+      </div>
+      <div>
+        <button type="button" id="saveParetoRunBtn" style="padding:10px 18px; border:none; border-radius:8px; background:#d97706; color:#fff; font-weight:700; cursor:pointer;">💾 Set as Active Timetable</button>
+      </div>
+    </div>
+
+    <!-- Pareto Scatter Plot & Exploration Wrap -->
+    <div id="paretoResultWrap" style="display:none; margin-top:20px;"></div>
+  </section>
+
   <section class="panel-section" id="resultSection">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h2 style="margin:0;">5. Result</h2>
+      <h2 style="margin:0;">5. Single Timetable Result</h2>
       <span id="activeRunBadge" style="font-size:13px; font-weight:600; color:var(--muted);"></span>
     </div>
     <div class="readiness-banner not-ready" id="solveWarning" style="display:none"></div>
@@ -187,9 +329,7 @@
     <h2>6. Compare solvers</h2>
     <p class="notes" id="compareNote">
       Runs the selected solvers back-to-back against the current data and compares them
-      head-to-head. This is one synchronous request — it does not create a run in the history
-      table below and has no export links; cpsat/pipeline can each take 20&ndash;60s, so comparing
-      all three can take a few minutes.
+      head-to-head.
     </p>
     <div class="controls">
       <div class="control">
@@ -217,8 +357,7 @@
         </thead>
         <tbody id="compareTableBody"></tbody>
       </table>
-      <p class="notes">Lower soft cost is better. Hard violations dominate: any result with hard
-        violations above zero ranks below one with zero, regardless of soft cost.</p>
+      <p class="notes">Lower soft cost is better. Hard violations dominate.</p>
 
       <section class="tabs" id="compareTabs"></section>
       <div class="view-mode-bar" id="compareViewModeBar" style="margin-top:14px;">
@@ -235,44 +374,10 @@
     </div>
   </section>
 
-  <section class="panel-section" id="paretoSection">
-    <h2>7. Pareto trade-off sweep</h2>
-    <p class="notes">
-      Traces the actual trade-off frontier between competing objectives (faculty day-load balance,
-      student idle-gap/day-span cost, late-lab-slot placement) using an epsilon-constraint sweep on
-      the CP-SAT model — reveals trade-offs a single scalarized soft-cost number hides. Each pair
-      does several CP-SAT solves, so this runs as a background job like Generate above; a full
-      3-pair sweep at the defaults can take several minutes.
-    </p>
-    <div class="controls">
-      <div class="control">
-        <label>Objective pairs</label>
-        <div class="compare-checks">
-          <label><input type="checkbox" id="parFacStu" checked> faculty vs students</label>
-          <label><input type="checkbox" id="parFacLab" checked> faculty vs labs</label>
-          <label><input type="checkbox" id="parStuLab" checked> students vs labs</label>
-        </div>
-      </div>
-      <div class="control">
-        <label>Time limit per point (s)</label>
-        <input type="number" id="parTimeLimit" value="45" min="15" max="300" step="5">
-      </div>
-      <div class="control">
-        <label>Points per pair</label>
-        <input type="number" id="parSweepPoints" value="5" min="3" max="9" step="1">
-      </div>
-      <button id="paretoBtn">Run sweep</button>
-    </div>
-    <div class="status-line" id="paretoStatus"></div>
-    <div id="paretoResultWrap" style="display:none"></div>
-  </section>
-
   <section class="panel-section" id="adjustSection" style="display:none">
-    <h2>8. Holiday / rain adjustment</h2>
+    <h2>7. Holiday / rain adjustment</h2>
     <p class="notes">Adjust the current timetable (run <span id="adjustRunId">—</span>) for a sudden holiday or
-      rain. The blocked window is closed off and the <b>whole week is re-solved</b> around it, warm-started from
-      the current timetable — so a rained-out session is rescheduled elsewhere in the week rather than dropped.
-      Most unaffected sessions stay put, but that is a tendency, not a guarantee. The stored run is never changed.</p>
+      rain.</p>
     <div class="controls">
       <div class="control">
         <label>Day</label>
@@ -312,9 +417,7 @@
     </div>
     <div class="control-row" id="adjRelaxWrap">
       <label>Also relax these days
-        <span class="notes">— exempts a day from the 6–8h load / labs-every-day / one-break rules so
-          displaced sessions have somewhere legal to land. Use when a whole-day holiday reports unplaced
-          sessions.</span>
+        <span class="notes">— exempts a day from the 6–8h load / labs-every-day / one-break rules.</span>
       </label>
       <div class="compare-checks" id="adjRelaxDays">
         <label><input type="checkbox" value="0"> Mon</label>
@@ -329,7 +432,7 @@
   </section>
 
   <section class="panel-section" id="historySection">
-    <h2>9. History</h2>
+    <h2>8. History</h2>
     <table class="tt history-table" id="historyTable">
       <thead>
         <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th><th>Action</th></tr>
@@ -340,6 +443,6 @@
 
 </main>
 
-<script src="/static/platform.js?v=20261001_v3"></script>
+<script src="/static/platform.js?v=20261001_v4"></script>
 </body>
 </html>

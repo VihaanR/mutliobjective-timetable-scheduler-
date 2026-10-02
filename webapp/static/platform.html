@@ -56,6 +56,7 @@
   <a href="/platform" class="active">Platform</a>
   <a href="/my-timetable">My Timetable</a>
   <a href="/guideline">NEP Guideline</a>
+  <a href="/static/index.html">⚡ Evolution</a>
   <div class="nav-user">
     <span id="navName"></span>
     <button type="button" id="logoutBtn">Log out</button>
@@ -104,7 +105,7 @@
 
   <section class="panel-section" id="genSection">
     <h2>4. Generate Timetable</h2>
-    <div class="controls" style="flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+    <div class="controls" style="flex-wrap: wrap; gap: 12px; align-items: flex-end;">
       <div class="control">
         <label>Solver Engine</label>
         <select id="solver">
@@ -119,14 +120,62 @@
         <label>Time Limit (s)</label>
         <input type="number" id="timeLimit" value="180" min="5" max="1200" step="10">
       </div>
-      <button id="generateBtn" class="secondary">Generate Selected Class</button>
-      <button type="button" id="generateOddYearsBtn" style="background: linear-gradient(135deg, #10b981, #059669); color: #fff; font-weight: 600; box-shadow: 0 4px 12px rgba(16,185,129,0.3);">⚡ Generate All Odd Semesters (Sem 3 + 5 + 7)</button>
-      <button type="button" id="generateEvenYearsBtn" class="secondary">Generate All Even Semesters (Sem 4 + 6 + 8)</button>
-      <button type="button" id="generateAllYearsBtn" class="secondary">Generate All Loaded</button>
+      <button type="button" id="generateTimetableBtn" style="background: linear-gradient(135deg, #003877, #1e40af); color: #fff; font-weight: 700; padding: 10px 22px; border-radius: 8px; border: none; cursor: pointer; box-shadow: 0 4px 14px rgba(0, 56, 119, 0.25); display: inline-flex; align-items: center; gap: 8px; font-size: 14px; transition: all 0.2s ease;">
+        ⚡ Generate Timetable
+      </button>
       <button type="button" id="genStopBtn" style="display:none; background:linear-gradient(135deg, #dc2626, #b91c1c); color:#fff; font-weight:600; border:none; border-radius:8px; padding:10px 16px; cursor:pointer;">🛑 Stop</button>
     </div>
     <p class="notes" id="genNote" style="margin-top: 10px;">CP-SAT solves all cross-year shared faculty and lab constraints simultaneously with zero clash and minimal student gaps.</p>
     <div class="status-line" id="genStatus"></div>
+
+    <!-- Generate Timetable Scope Selection Modal -->
+    <div id="genScopeModal" class="pareto-scope-modal-backdrop" style="display:none;">
+      <div class="pareto-scope-card">
+        <div class="pareto-scope-header">
+          <h3>⚡ Generate Timetable — Choose Scope</h3>
+          <p>Select which academic semester datasets to solve with CP-SAT (cross-year shared faculty &amp; zero clash):</p>
+        </div>
+        <div class="pareto-options-grid">
+          <div class="pareto-scope-opt highlight-opt" id="genOptOddSem">
+            <div class="scope-opt-info">
+              <h4>⚡ All Odd Semesters (Sem 3 + 5 + 7)</h4>
+              <p>Simultaneously solve cross-year shared faculty &amp; labs across all 3 odd semester years with zero clashes</p>
+            </div>
+            <span class="scope-opt-badge">Recommended</span>
+          </div>
+          <div class="pareto-scope-opt" id="genOptEvenSem">
+            <div class="scope-opt-info">
+              <h4>🌓 All Even Semesters (Sem 4 + 6 + 8)</h4>
+              <p>Simultaneously solve cross-year shared faculty &amp; labs across all even semester years</p>
+            </div>
+            <span class="scope-opt-badge">Even Term</span>
+          </div>
+          <div class="pareto-scope-opt" id="genOptSpecificSem" style="flex-direction: column; align-items: stretch; gap: 10px; cursor: default;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <div class="scope-opt-info">
+                <h4>🎯 Select a Specific Semester / Class</h4>
+                <p>Target a single branch &amp; semester dataset</p>
+              </div>
+              <span class="scope-opt-badge">Specific Class</span>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:4px;">
+              <select id="genSpecificBranchSelect" style="flex:1; padding:8px 10px; border-radius:6px; border:1.5px solid var(--line); font-weight:600; font-size:13px; background:#fff; color:var(--text);"></select>
+              <button type="button" id="genSpecificBtn" style="background:linear-gradient(135deg, #003877, #1e40af); color:#fff; font-weight:700; border:none; border-radius:6px; padding:8px 16px; cursor:pointer; font-size:13px; white-space:nowrap;">Generate Class</button>
+            </div>
+          </div>
+          <div class="pareto-scope-opt" id="genOptAllLoaded">
+            <div class="scope-opt-info">
+              <h4>🌐 All Loaded Datasets</h4>
+              <p>Solve every loaded academic department and semester together</p>
+            </div>
+            <span class="scope-opt-badge">All Classes</span>
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end;">
+          <button type="button" id="closeGenScopeModalBtn" class="secondary" style="padding:8px 20px; border-radius:6px; cursor:pointer; font-weight:600;">Cancel</button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="panel-section" id="paretoSection">
@@ -544,6 +593,6 @@
 
 </main>
 
-<script src="/static/platform.js?v=20261002_v3"></script>
+<script src="/static/platform.js?v=20261002_v4"></script>
 </body>
 </html>

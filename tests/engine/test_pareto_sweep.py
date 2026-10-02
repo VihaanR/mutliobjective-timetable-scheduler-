@@ -423,9 +423,7 @@ class TestSweepPairHints:
 
 
 class TestSeedingAcrossSolves:
-    """Payoff solves have no epsilon bound, so any feasible timetable found earlier is a valid
-    complete hint for them. The greedy warm start is usually not (it carries hard violations), and
-    seeding only from it let every pair come back empty on a busy machine."""
+    """Payoff solves must be mathematically independent: hint=None for all payoff stages."""
 
     def _payoff_hints(self):
         hints = []
@@ -440,17 +438,17 @@ class TestSeedingAcrossSolves:
         session.solve_unbounded = spy
         return session, hints
 
-    def test_minimize_side_payoff_is_seeded_from_first_payoff_solution(self):
+    def test_minimize_side_payoff_is_unhinted(self):
         session, hints = self._payoff_hints()
         greedy = object()
         with patch("engine.pareto_sweep.ParetoSession", return_value=session):
             sweep_pair(None, _small_problem(), "faculty", "students",
                        time_limit_s=5, sweep_points=5, warm_start=greedy)
-        first_sol = session.returned[0][0]
-        assert hints[0] is greedy        # nothing better exists yet
-        assert hints[1] is first_sol     # min `minimize`: seeded from the feasible first solve
+        # All payoff solves must use hint=None
+        for h in hints:
+            assert h is None
 
-    def test_sweep_carries_a_feasible_solution_into_the_next_pair(self):
+    def test_sweep_payoff_does_not_inherit_previous_pair_hints(self):
         from engine import pareto_sweep
 
         sessions = []
@@ -467,5 +465,6 @@ class TestSeedingAcrossSolves:
             greedy_cls.return_value.solve.return_value = greedy
             pareto_sweep.sweep(_small_problem(), pairs=[("faculty", "students"), ("faculty", "labs")],
                                time_limit_s=5, sweep_points=5)
-        assert sessions[0].hints[0] is greedy
-        assert sessions[1].hints[0] is sessions[0].returned[0][0]
+        for s in sessions:
+            for h in s.hints:
+                assert h is None

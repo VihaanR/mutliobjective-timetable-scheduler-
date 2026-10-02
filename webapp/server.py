@@ -12,7 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+import json
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlmodel import Session
@@ -44,6 +45,44 @@ for _router in (auth_router.router, branches.router, faculty.router, students.ro
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,
                 calendar.router, pareto.router):
     app.include_router(_router)
+
+
+EVOLUTION_DATA_FILE = Path(__file__).resolve().parent / "evolution_data.json"
+
+
+@app.get("/api/evolution")
+def get_evolution():
+    if not EVOLUTION_DATA_FILE.exists():
+        raise HTTPException(status_code=404, detail="No evolution data found. Run solver first.")
+    try:
+        with open(EVOLUTION_DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read evolution data: {exc}")
+
+
+@app.get("/api/evolution/step/{n}")
+def get_evolution_step(n: int):
+    if not EVOLUTION_DATA_FILE.exists():
+        raise HTTPException(status_code=404, detail="No evolution data found. Run solver first.")
+    try:
+        with open(EVOLUTION_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read evolution data: {exc}")
+
+    if not isinstance(data, list) or len(data) == 0:
+        raise HTTPException(status_code=404, detail="No evolution data found. Run solver first.")
+    if n < 1 or n > len(data):
+        raise HTTPException(status_code=404, detail=f"Step {n} not found. Available steps: 1 to {len(data)}.")
+
+    return data[n - 1]["timetable_data"]
+
+
+@app.get("/evolution")
+@app.get("/index.html")
+def evolution_page():
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 # --------------------------------------------------------------------------- ported dashboard platform

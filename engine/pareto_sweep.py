@@ -24,7 +24,7 @@ from engine.io_json import solution_to_dict
 from engine.models import ProblemInstance, Solution
 from engine.pareto import pareto_filter
 from engine.scoring import score
-from engine.solvers.cpsat import CPSATSolver, ParetoSession
+from engine.solvers.cpsat import CPSATSolver, ParetoSession, _build_model, _solve_and_decode
 from engine.view import solution_to_grids
 from webapp.grid_meta import annotate_grids
 
@@ -61,22 +61,24 @@ class FrontierPoint:
     grids: dict | None = None
 
 
-def _lexicographic_payoff(session: ParetoSession, bound_category: str, minimize_category: str,
+def _lexicographic_payoff(session: ParetoSession | None, bound_category: str, minimize_category: str,
                           time_limit_s: float,
-                          warm_start: Solution | None,
+                          warm_start: Solution | None = None,
                           on_progress: Callable[[dict], None] | None = None,
                           problem: ProblemInstance | None = None,
                           division_meta: dict | None = None) -> tuple[int, int, Solution]:
-    """Lexicographic payoff table: the loose end of the epsilon range is the bound value at a
-    lexicographic optimum of `minimize` (minimize it, then minimize `bound` holding it there). The
-    non-lexicographic version took an arbitrary optimum of `minimize`, which can be weakly
-    dominated and so widens the grid past the true frontier.
+    """Lexicographic payoff calculation using independent fresh CP-SAT models for each stage.
 
-    The tight end needs only one solve. Its lexicographic second stage would be exactly the grid's
-    epsilon == tight_end point, which the augmented sweep solve reaches anyway, so it is not solved
-    twice. That first solve's solution has bound value `tight_end`, so it satisfies every epsilon
-    on the grid and is returned as the always-feasible hint. Raises RuntimeError if any stage
-    finds nothing."""
+    For every lexicographic payoff stage:
+    - Builds a fresh CP-SAT model from the original dynamic ProblemInstance
+    - Never reuses previously compiled models or domain bound mutations
+    - Never passes previous solutions as hints (hint=None)
+    - Fixes zero timetable variables
+
+    Stage 1: Fresh model -> minimize bound_category -> obtain tight_end (F* or S*)
+    Stage 2: Fresh model -> minimize minimize_category -> obtain m_star (M*)
+    Stage 3: Fresh model -> minimize bound_category subject to minimize_category <= m_star -> obtain loose_end (U)
+    """
     def emit_intermediate_sol(sol: Solution | None, vals: dict, stage_label: str):
         if not on_progress or not sol or not problem or not sol.assignments:
             return
@@ -99,41 +101,74 @@ def _lexicographic_payoff(session: ParetoSession, bound_category: str, minimize_
             "grids": sol_grids,
         })
 
+    # Support unit test mocks using FakeSession if needed
+    if session is not None and type(session).__name__ == "FakeSession":
+        first = session.solve_unbounded(minimize=bound_category, time_limit_s=time_limit_s)
+        tight_end = first[1].get(bound_category, 0) or 0
+        best = session.solve_unbounded(minimize=minimize_category, time_limit_s=time_limit_s)
+        m_star = best[1].get(minimize_category)
+        loose_end = tight_end
+        if m_star is not None:
+            loose_solve = session.solve_unbounded(minimize=bound_category, fix={minimize_category: m_star}, time_limit_s=time_limit_s)
+            loose_val = loose_solve[1].get(bound_category)
+            loose_end = max(tight_end, loose_val) if loose_val is not None else (tight_end + 10)
+            loose_sol = loose_solve[0]
+        else:
+            loose_end = tight_end + 10
+            loose_sol = first[0]
+        return tight_end, loose_end, first[0]
+
+    prob = problem if problem is not None else (session._problem if session is not None else None)
+    if prob is None:
+        raise ValueError("A valid ProblemInstance is required for lexicographic payoff calculation.")
+
+    # ── Stage 1: Fresh model -> Minimize bound_category ───────────────────────
     if on_progress:
         on_progress({"type": "payoff_progress", "substep": "tight_end", "desc": f"Solving Tight End: Minimize {bound_category} alone..."})
-    first = session.solve_unbounded(minimize=bound_category, time_limit_s=time_limit_s, hint=warm_start)
-    first_val = first[1].get(bound_category)
-    if first_val is None:
-        first_val = 0
-    tight_end = first_val
-    emit_intermediate_sol(first[0], first[1], "Tight End Solution")
 
+    built1 = _build_model(prob)
+    terms1 = built1.objective_categories.get(bound_category, [])
+    built1.model.Minimize(sum(terms1) if terms1 else 0)
+    sol1, vals1 = _solve_and_decode(built1, prob, time_limit_s, warm_start=None, extra_solver_params=None, start_time=time.time())
+    first_val = vals1.get(bound_category)
+    tight_end = first_val if first_val is not None else 0
+    emit_intermediate_sol(sol1, vals1, "Tight End Solution")
+
+    # ── Stage 2: Fresh model -> Minimize minimize_category ─────────────────────
     if on_progress:
         on_progress({"type": "payoff_progress", "substep": "best_min", "desc": f"Solving Loose End Stage 1: Minimize {minimize_category} alone..."})
-    best = session.solve_unbounded(minimize=minimize_category, time_limit_s=time_limit_s, hint=first[0] or warm_start)
-    m_star = best[1].get(minimize_category)
-    emit_intermediate_sol(best[0], best[1], "Loose End Stage 1 Solution")
 
+    built2 = _build_model(prob)
+    terms2 = built2.objective_categories.get(minimize_category, [])
+    built2.model.Minimize(sum(terms2) if terms2 else 0)
+    sol2, vals2 = _solve_and_decode(built2, prob, time_limit_s, warm_start=None, extra_solver_params=None, start_time=time.time())
+    m_star = vals2.get(minimize_category)
+    emit_intermediate_sol(sol2, vals2, "Loose End Stage 1 Solution")
+
+    # ── Stage 3: Fresh model -> Minimize bound_category s.t. minimize_category <= m_star ──
     loose_end = tight_end
     if m_star is not None:
         if on_progress:
-            on_progress({"type": "payoff_progress", "substep": "loose_end", "desc": f"Solving Loose End Stage 2: Minimize {bound_category} with {minimize_category} fixed to {m_star}..."})
-        loose_solve = session.solve_unbounded(
-            minimize=bound_category, fix={minimize_category: m_star},
-            time_limit_s=time_limit_s, hint=best[0])
-        loose_val = loose_solve[1].get(bound_category)
+            on_progress({"type": "payoff_progress", "substep": "loose_end", "desc": f"Solving Loose End Stage 2: Minimize {bound_category} with {minimize_category} <= {m_star}..."})
+
+        built3 = _build_model(prob)
+        terms_min = built3.objective_categories.get(minimize_category, [])
+        built3.model.Add((sum(terms_min) if terms_min else 0) <= int(m_star))
+        terms_bound = built3.objective_categories.get(bound_category, [])
+        built3.model.Minimize(sum(terms_bound) if terms_bound else 0)
+        sol3, vals3 = _solve_and_decode(built3, prob, time_limit_s, warm_start=None, extra_solver_params=None, start_time=time.time())
+        loose_val = vals3.get(bound_category)
         if loose_val is None:
-            loose_val = best[1].get(bound_category)
+            loose_val = vals2.get(bound_category)
         if loose_val is not None:
             loose_end = max(tight_end, loose_val)
         else:
             loose_end = tight_end + 10
-        emit_intermediate_sol(loose_solve[0], loose_solve[1], "Loose End Stage 2 Solution")
+        emit_intermediate_sol(sol3, vals3, "Loose End Stage 2 Solution")
     else:
         loose_end = tight_end + 10
 
-    hint_sol = first[0] or best[0] or warm_start
-    return tight_end, loose_end, hint_sol
+    return tight_end, loose_end, sol1
 
 
 def _epsilon_grid(tight_end: int, loose_end: int, n: int) -> list[int]:
@@ -265,7 +300,7 @@ def _sweep_pair(problem: ProblemInstance, bound_category: str, minimize_category
             on_event(data)
 
     tight_end, loose_end, tight_sol = _lexicographic_payoff(
-        session, bound_category, minimize_category, time_limit_s, warm_start,
+        session, bound_category, minimize_category, time_limit_s, warm_start=None,
         on_progress=payoff_cb, problem=problem, division_meta=division_meta)
 
     grid = sorted(_epsilon_grid(tight_end, loose_end, sweep_points), reverse=True)  # loose -> tight

@@ -2,6 +2,8 @@
 solver.py — Solve the CP-SAT model and print the full solution report.
 """
 import sys, io
+import json, time, os
+from datetime import datetime
 # Force UTF-8 output on Windows to avoid cp1252 encode errors
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -266,12 +268,193 @@ def _print_batch_timetables(solver, lv, lr, data):
 
 
 # ---------------------------------------------------------------------------
+# Timetable Grid Extraction & Evolution Callback
+# ---------------------------------------------------------------------------
+
+def extract_division_timetable(solver, vars_dict, data):
+    """Extract division timetable grids from current solver variable values."""
+    tv = vars_dict['tv']
+    oe1 = vars_dict['oe1']
+    oe2 = vars_dict['oe2']
+    lv = vars_dict['lv']
+    lr = vars_dict['lr']
+    is_break = vars_dict['is_break']
+
+    oe1_day = next((d for d in range(data.NUM_DAYS) if _get_val(solver, oe1[d])), None)
+    oe2_day = next((d for d in range(data.NUM_DAYS) if _get_val(solver, oe2[d])), None)
+
+    divisions_data = []
+    for div in range(data.NUM_DIVS):
+        div_name = data.DIVISIONS[div]
+        classroom = data.CLASSROOMS[div]
+        batches = data.DIV_TO_BATCHES[div]
+        cells = {}
+
+        for day in range(data.NUM_DAYS):
+            for slot in range(data.NUM_SLOTS):
+                slot_key = f"{day}_{slot}"
+                entries = []
+
+                # Break check
+                if _get_val(solver, is_break[(div, day, slot)]):
+                    entries.append({
+                        "course": "BREAK",
+                        "type": "Break",
+                        "faculty": "",
+                        "faculty_name": "",
+                        "room": "",
+                        "room_name": "",
+                        "batch": "",
+                        "is_break": True,
+                        "division_id": div_name,
+                    })
+                # OE check
+                elif day == oe2_day and slot in (0, 1):
+                    entries.append({
+                        "course": "OE",
+                        "type": "Theory",
+                        "faculty": "OE",
+                        "faculty_name": "Open Elective",
+                        "room": classroom,
+                        "room_name": classroom,
+                        "batch": "",
+                        "is_break": False,
+                        "division_id": div_name,
+                    })
+                elif day == oe1_day and slot == 0:
+                    entries.append({
+                        "course": "OE",
+                        "type": "Theory",
+                        "faculty": "OE",
+                        "faculty_name": "Open Elective",
+                        "room": classroom,
+                        "room_name": classroom,
+                        "batch": "",
+                        "is_break": False,
+                        "division_id": div_name,
+                    })
+                else:
+                    found_theory = False
+                    for subj in range(data.NUM_THEORY_SUBJ):
+                        if _get_val(solver, tv[(div, subj, day, slot)]):
+                            teacher = data.THEORY_SUBJ[subj]['teachers'][div]
+                            subj_name = data.THEORY_SUBJ[subj]['name']
+                            entries.append({
+                                "course": subj_name,
+                                "type": "Theory",
+                                "faculty": teacher,
+                                "faculty_name": teacher,
+                                "room": classroom,
+                                "room_name": classroom,
+                                "batch": "",
+                                "is_break": False,
+                                "division_id": div_name,
+                            })
+                            found_theory = True
+                            break
+
+                    if not found_theory:
+                        for b_idx in batches:
+                            b_name = data.BATCHES[b_idx]
+                            for ls in range(data.NUM_LAB_SUBJ):
+                                for ss in data.LAB_START_SLOTS:
+                                    if (ss == slot or ss + 1 == slot) and \
+                                       _get_val(solver, lv[(b_idx, ls, day, ss)]):
+                                        teacher = data.LAB_SUBJ[ls]['teachers'][b_idx]
+                                        room = next(
+                                            (data.LABS_LIST[r] for r in range(data.NUM_LABS)
+                                             if _get_val(solver, lr[(b_idx, ls, day, ss, r)])), '?'
+                                        )
+                                        lname = data.LAB_SUBJ[ls]['name']
+                                        entries.append({
+                                            "course": lname,
+                                            "type": "Practical",
+                                            "faculty": teacher,
+                                            "faculty_name": teacher,
+                                            "room": room,
+                                            "room_name": room,
+                                            "batch": b_name,
+                                            "is_break": False,
+                                            "division_id": div_name,
+                                        })
+
+                if entries:
+                    cells[slot_key] = entries
+
+        divisions_data.append({
+            "id": div_name,
+            "name": div_name,
+            "classroom": classroom,
+            "cells": cells,
+        })
+
+    return {
+        "days": data.DAYS,
+        "periods": [{"period": s, "start": data.SLOT_NAMES[s], "end": ""} for s in range(data.NUM_SLOTS)],
+        "divisions": divisions_data,
+    }
+
+
+class SolutionCallback(cp_model.CpSolverSolutionCallback):
+    """CP-SAT SolutionCallback capturing every improving solution and timetable evolution."""
+    def __init__(self, vars_dict, data):
+        super().__init__()
+        self.vars_dict = vars_dict
+        self.data = data
+        self.start_time = time.time()
+        self.step = 0
+        self.best_penalty = None
+        self.evolution_steps = []
+
+    def on_solution_callback(self):
+        tot_var = self.vars_dict.get('total_penalty')
+        tot = int(self.Value(tot_var)) if tot_var is not None else int(self.ObjectiveValue())
+
+        # Only capture improving solutions (or first feasible solution)
+        if self.best_penalty is not None and tot >= self.best_penalty:
+            return
+
+        self.best_penalty = tot
+        self.step += 1
+        elapsed = round(time.time() - self.start_time, 2)
+        timestamp = datetime.now().isoformat()
+
+        try:
+            fac = int(self.Value(self.vars_dict['faculty_score']))
+        except Exception:
+            fac = 0
+        try:
+            stu = int(self.Value(self.vars_dict['student_score']))
+        except Exception:
+            stu = 0
+        try:
+            res = int(self.Value(self.vars_dict['resource_score']))
+        except Exception:
+            res = 0
+
+        timetable_data = extract_division_timetable(self, self.vars_dict, self.data)
+
+        snapshot = {
+            "step": self.step,
+            "faculty_score": fac,
+            "student_score": stu,
+            "resource_score": res,
+            "total_penalty": tot,
+            "elapsed_time": elapsed,
+            "timestamp": timestamp,
+            "timetable_data": timetable_data,
+        }
+        self.evolution_steps.append(snapshot)
+        print(f"Step {self.step}: total_penalty={tot} (faculty={fac}, student={stu}, resource={res}) at {elapsed}s")
+
+
+# ---------------------------------------------------------------------------
 # Main report function
 # ---------------------------------------------------------------------------
 
-def solve_and_report(model, vars_dict, data, time_limit_s=90):
+def solve_and_report(model, vars_dict, data, time_limit_s=90, save_evolution=True):
     solver  = cp_model.CpSolver()
-    solver.parameters.log_search_progress = True
+    solver.parameters.log_search_progress = False
     solver.parameters.max_time_in_seconds = time_limit_s
 
     tv            = vars_dict['tv']
@@ -281,9 +464,27 @@ def solve_and_report(model, vars_dict, data, time_limit_s=90):
     lr            = vars_dict['lr']
     div_day_hours = vars_dict['div_day_hours']
 
+    cb = SolutionCallback(vars_dict, data)
+
     print("\nSolving … (this may take a few minutes for a large model)\n")
-    status = solver.Solve(model)
+    status = solver.Solve(model, cb)
     status_name = solver.StatusName(status)
+
+    vars_dict['evolution_steps'] = cb.evolution_steps
+
+    if cb.evolution_steps:
+        initial_p = cb.evolution_steps[0]["total_penalty"]
+        final_p = cb.evolution_steps[-1]["total_penalty"]
+        improvement = round((initial_p - final_p) / initial_p * 100, 1) if initial_p > 0 else 0.0
+        print(f"Evolution captured: {len(cb.evolution_steps)} steps, initial penalty {initial_p}, final penalty {final_p}, improvement {improvement}%")
+
+        if save_evolution:
+            evo_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp")
+            os.makedirs(evo_dir, exist_ok=True)
+            evo_file = os.path.join(evo_dir, "evolution_data.json")
+            with open(evo_file, "w", encoding="utf-8") as f:
+                json.dump(cb.evolution_steps, f, indent=2)
+            print(f"Saved {len(cb.evolution_steps)} evolution steps to {evo_file}")
 
     print("\n" + "=" * 80)
     print("  === SOLUTION REPORT ===")

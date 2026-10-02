@@ -93,16 +93,9 @@ def build_model(data):
             # Exactly one break per day
             model.AddExactlyOne(is_break[(div, day, s)] for s in range(9))
 
-            # Break window (after first 2 lectures, before last 2 lectures)
-            for s in range(9):
-                if s < 2 or s > 9 - 3:
-                    model.Add(is_break[(div, day, s)] == 0)
-                else:
-                    # If break at s, then s-1, s-2, s+1, s+2 must be on campus
-                    model.AddImplication(is_break[(div, day, s)], is_on_campus[(div, day, s-1)])
-                    model.AddImplication(is_break[(div, day, s)], is_on_campus[(div, day, s-2)])
-                    model.AddImplication(is_break[(div, day, s)], is_on_campus[(div, day, s+1)])
-                    model.AddImplication(is_break[(div, day, s)], is_on_campus[(div, day, s+2)])
+            # Break window (cannot be at slot 0 or slot 8)
+            model.Add(is_break[(div, day, 0)] == 0)
+            model.Add(is_break[(div, day, 8)] == 0)
 
     # ---- HC15 + HC16: OE pattern ----------------------------------------
     # Exactly one 1-hr day and one 2-hr day; must be different days.
@@ -477,24 +470,51 @@ def build_model(data):
 
             model.Add(sum(is_on_campus[(div, day, s)] for s in range(9)) == div_day_hours[(div, day)] + 1)
 
-            # ST1: HARD CONSTRAINT: Student No-Gap
-            for s in range(9):
-                before_empty = model.NewBoolVar(f'stu_be_{div}_{day}_{s}')
-                after_empty = model.NewBoolVar(f'stu_ae_{div}_{day}_{s}')
+            # =================================================================
+            # Hard Constraint 1 — No Student Idle Gaps:
+            # Within both pre-break block and post-break block independently,
+            # occupied slots must form a single contiguous block with no holes.
+            # =================================================================
+            for b in range(9):
+                # Pre-break block: slots 0 .. b-1
+                for i in range(b - 2):
+                    for j in range(i + 1, b - 1):
+                        for k in range(j + 1, b):
+                            model.AddBoolOr([
+                                is_break[(div, day, b)].Not(),
+                                active_physical[(div, day, i)].Not(),
+                                active_physical[(div, day, j)],
+                                active_physical[(div, day, k)].Not()
+                            ])
 
-                if s == 0:
-                    model.Add(before_empty == 1)
+                # Post-break block: slots b+1 .. 8
+                for i in range(b + 1, 7):
+                    for j in range(i + 1, 8):
+                        for k in range(j + 1, 9):
+                            model.AddBoolOr([
+                                is_break[(div, day, b)].Not(),
+                                active_physical[(div, day, i)].Not(),
+                                active_physical[(div, day, j)],
+                                active_physical[(div, day, k)].Not()
+                            ])
+
+            # =================================================================
+            # Flexible Break Window Constraints:
+            # - At least 2 active slots before break (flexible slot placement)
+            # - At least 1 active slot after break (no break at end of day)
+            # =================================================================
+            for b in range(9):
+                after_break_slots = [active_physical[(div, day, s)] for s in range(b + 1, 9)]
+                if after_break_slots:
+                    model.Add(sum(after_break_slots) >= 1).OnlyEnforceIf(is_break[(div, day, b)])
                 else:
-                    model.Add(sum(is_on_campus[(div, day, i)] for i in range(0, s)) == 0).OnlyEnforceIf(before_empty)
-                    model.Add(sum(is_on_campus[(div, day, i)] for i in range(0, s)) > 0).OnlyEnforceIf(before_empty.Not())
+                    model.Add(is_break[(div, day, b)] == 0)
 
-                if s == 8:
-                    model.Add(after_empty == 1)
+                before_break_slots = [active_physical[(div, day, s)] for s in range(0, b)]
+                if len(before_break_slots) >= 2:
+                    model.Add(sum(before_break_slots) >= 2).OnlyEnforceIf(is_break[(div, day, b)])
                 else:
-                    model.Add(sum(is_on_campus[(div, day, i)] for i in range(s+1, 9)) == 0).OnlyEnforceIf(after_empty)
-                    model.Add(sum(is_on_campus[(div, day, i)] for i in range(s+1, 9)) > 0).OnlyEnforceIf(after_empty.Not())
-
-                model.AddBoolOr([is_on_campus[(div, day, s)], before_empty, after_empty])
+                    model.Add(is_break[(div, day, b)] == 0)
 
     # ST2: >2 consecutive difficult subjects
     consec_triples = [(0, 1, 2), (1, 2, 3), (5, 6, 7), (6, 7, 8)]

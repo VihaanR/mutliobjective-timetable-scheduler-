@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>University Timetable Solver — Evolution Viewer</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20261002_evo">
+</head>
+<body>
+    <header class="navbar">
+        <div class="brand">
+            <div class="logo">University Timetable UI <span>&mdash; CP-SAT Live Evolution Viewer</span></div>
+        </div>
+        <div class="nav-links">
+            <a href="/platform">Platform</a>
+            <a href="/dashboard">Dashboard</a>
+            <a href="/my-timetable">My Timetable</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar">
+            <button class="tab-btn" data-tab="divisions">Divisions</button>
+            <button class="tab-btn" data-tab="teachers">Teachers</button>
+            <button class="tab-btn" data-tab="classrooms">Classrooms</button>
+            <button class="tab-btn" data-tab="labs">Labs</button>
+            <button class="tab-btn" data-tab="stats">Stats</button>
+            <button class="tab-btn" data-tab="pareto">Pareto</button>
+            <button class="tab-btn active" data-tab="evolution" id="tabBtnEvolution">
+                ⚡ Evolution <span class="tab-badge" id="sidebarStepsBadge">19</span>
+            </button>
+        </aside>
+
+        <main class="main-content">
+            <!-- Non-evolution legacy container (if user clicks other tabs) -->
+            <div id="legacyTabWrap" style="display:none;">
+                <div class="tab-header">
+                    <select id="selector" class="dropdown-div"></select>
+                </div>
+                <div id="grid-container" class="grid-view"></div>
+            </div>
+
+            <!-- Evolution Tab Container -->
+            <div id="evolutionTabWrap">
+                <!-- Section 1: Summary Bar (Top) -->
+                <div class="summary-bar">
+                    <div class="stat-card card-accent">
+                        <div class="stat-title">Total Steps</div>
+                        <div class="stat-value" id="summaryTotalSteps">19</div>
+                        <div class="stat-sub">Solver intermediate solutions</div>
+                    </div>
+                    <div class="stat-card card-dark">
+                        <div class="stat-title">Initial Penalty</div>
+                        <div class="stat-value" id="summaryInitialPenalty">346</div>
+                        <div class="stat-sub">Starting solution at 7.52s</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">Final Penalty</div>
+                        <div class="stat-value" id="summaryFinalPenalty">43</div>
+                        <div class="stat-sub" id="summaryImprovement" style="color:#2e7d32; font-weight:700;">87.6% improvement</div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Line Chart (Middle) -->
+                <section class="chart-section">
+                    <div class="chart-header">
+                        <h2 class="chart-title">📈 Objective Score Improvement over Steps</h2>
+                        <div class="chart-legend">
+                            <span class="legend-item">
+                                <span class="legend-line" style="background:#4A2C17;"></span>
+                                <span class="legend-dot" style="background:#4A2C17;"></span>
+                                <span>Total Penalty (#4A2C17)</span>
+                            </span>
+                            <span class="legend-item">
+                                <span class="legend-line" style="background:#6B4226;"></span>
+                                <span class="legend-dot" style="background:#6B4226;"></span>
+                                <span>Faculty Score (#6B4226)</span>
+                            </span>
+                            <span class="legend-item">
+                                <span class="legend-line" style="background:#C8A97E;"></span>
+                                <span class="legend-dot" style="background:#C8A97E;"></span>
+                                <span>Student Score (#C8A97E)</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="canvas-wrap" id="canvasWrap">
+                        <canvas id="chartCanvas"></canvas>
+                        <div id="chartTooltip" class="chart-tooltip"></div>
+                    </div>
+                </section>
+
+                <!-- Section 3: Step Controls (Below Chart) -->
+                <section class="controls-section">
+                    <div class="slider-row">
+                        <span class="slider-label" id="sliderLabel">Step 19 / 19</span>
+                        <input type="range" id="stepSlider" class="step-slider" min="1" max="19" value="19">
+                    </div>
+                    <div class="controls-actions">
+                        <div class="btn-group">
+                            <button type="button" class="ctrl-btn primary" id="autoPlayBtn">▶ Play</button>
+                            <button type="button" class="ctrl-btn" id="prevStepBtn">◀ Prev</button>
+                            <button type="button" class="ctrl-btn" id="nextStepBtn">Next ▶</button>
+                        </div>
+                        <div class="step-info-bar" id="stepInfoBar">
+                            <span class="badge" id="stepBadge">Step 19</span>
+                            <span>Faculty: <b id="infoFaculty">40</b></span>
+                            <span>|</span>
+                            <span>Student: <b id="infoStudent">0</b></span>
+                            <span>|</span>
+                            <span>Resource: <b id="infoResource">3</b></span>
+                            <span>|</span>
+                            <span>Total: <b id="infoTotal" style="color:#4A2C17;">43</b></span>
+                            <span>|</span>
+                            <span>Time: <b id="infoTime">11.73s</b></span>
+                            <span class="delta-badge" id="infoDelta">-5 from previous</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 4: Division Timetable Grid (Bottom) -->
+                <section class="grid-section">
+                    <div class="grid-header">
+                        <div class="grid-title-wrap">
+                            <h2 class="grid-title">📅 Division Timetable Grid</h2>
+                            <select id="divisionSelect" class="dropdown-div">
+                                <option value="D1">Division D1 (Class-D1)</option>
+                                <option value="D2">Division D2 (Class-D2)</option>
+                                <option value="D3">Division D3 (Class-D3)</option>
+                            </select>
+                        </div>
+                        <div style="font-size:13px; font-weight:700; color:var(--primary);" id="activeGridStepLabel">
+                            Showing solution snapshot at Step 19
+                        </div>
+                    </div>
+
+                    <div id="timetableGridArea">
+                        <!-- Rendered timetable grid table -->
+                    </div>
+
+                    <div class="legend-grid-wrap">
+                        <span class="legend-item"><span class="chip-box" style="background:var(--cell-theory);"></span> Theory (light cream)</span>
+                        <span class="legend-item"><span class="chip-box" style="background:var(--cell-lab);"></span> Lab (light brown)</span>
+                        <span class="legend-item"><span class="chip-box" style="background:var(--cell-oe);"></span> Open Elective (gold tint)</span>
+                        <span class="legend-item"><span class="chip-box" style="background:var(--cell-break);"></span> Break (grey)</span>
+                        <span class="legend-item"><span class="chip-box" style="background:var(--cell-empty);"></span> Empty (white)</span>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    (function() {
+        const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+        const SLOTS = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8', 'H9'];
+
+        let evolutionSteps = [];
+        let currentStepIndex = 18; // 0-based index (step 19 by default)
+        let activeDivision = "D1";
+        let stepTimetableCache = {};
+        let isPlaying = false;
+        let playInterval = null;
+
+        // Elements
+        const slider = document.getElementById("stepSlider");
+        const sliderLabel = document.getElementById("sliderLabel");
+        const autoPlayBtn = document.getElementById("autoPlayBtn");
+        const prevStepBtn = document.getElementById("prevStepBtn");
+        const nextStepBtn = document.getElementById("nextStepBtn");
+        const divisionSelect = document.getElementById("divisionSelect");
+        const timetableGridArea = document.getElementById("timetableGridArea");
+        const canvas = document.getElementById("chartCanvas");
+        const tooltip = document.getElementById("chartTooltip");
+
+        // Info bar elements
+        const stepBadge = document.getElementById("stepBadge");
+        const infoFaculty = document.getElementById("infoFaculty");
+        const infoStudent = document.getElementById("infoStudent");
+        const infoResource = document.getElementById("infoResource");
+        const infoTotal = document.getElementById("infoTotal");
+        const infoTime = document.getElementById("infoTime");
+        const infoDelta = document.getElementById("infoDelta");
+        const activeGridStepLabel = document.getElementById("activeGridStepLabel");
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.currentTarget;
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                target.classList.add('active');
+                const tab = target.getAttribute('data-tab');
+                if (tab === 'evolution') {
+                    document.getElementById('evolutionTabWrap').style.display = 'block';
+                    document.getElementById('legacyTabWrap').style.display = 'none';
+                    renderChart();
+                } else {
+                    document.getElementById('evolutionTabWrap').style.display = 'none';
+                    document.getElementById('legacyTabWrap').style.display = 'block';
+                    renderLegacyTab(tab);
+                }
+            });
+        });
+
+        // Fetch evolution data on load
+        async function initEvolution() {
+            try {
+                const res = await fetch("/api/evolution");
+                if (!res.ok) {
+                    throw new Error("HTTP " + res.status);
+                }
+                evolutionSteps = await res.json();
+                if (!evolutionSteps || evolutionSteps.length === 0) {
+                    timetableGridArea.innerHTML = "<p style='color:red;'>No evolution steps found.</p>";
+                    return;
+                }
+
+                // Update summary bar
+                const totalSteps = evolutionSteps.length;
+                const initialP = evolutionSteps[0].total_penalty;
+                const finalP = evolutionSteps[totalSteps - 1].total_penalty;
+                const imp = initialP > 0 ? (((initialP - finalP) / initialP) * 100).toFixed(1) : 0;
+
+                document.getElementById("summaryTotalSteps").textContent = totalSteps;
+                document.getElementById("sidebarStepsBadge").textContent = totalSteps;
+                document.getElementById("summaryInitialPenalty").textContent = initialP;
+                document.getElementById("summaryFinalPenalty").textContent = `${finalP} (${imp}% improvement)`;
+                document.getElementById("summaryImprovement").textContent = `${imp}% improvement`;
+
+                // Update slider limits
+                slider.min = 1;
+                slider.max = totalSteps;
+                
+                // Check if query param ?step=N was passed
+                const urlParams = new URLSearchParams(window.location.search);
+                const stepParam = parseInt(urlParams.get("step"), 10);
+                if (!isNaN(stepParam) && stepParam >= 1 && stepParam <= totalSteps) {
+                    currentStepIndex = stepParam - 1;
+                } else {
+                    currentStepIndex = totalSteps - 1; // Default to step 19 (final solution)
+                }
+                slider.value = currentStepIndex + 1;
+
+                // Cache step timetables already received
+                evolutionSteps.forEach((s, idx) => {
+                    if (s.timetable_data) {
+                        stepTimetableCache[idx + 1] = s.timetable_data;
+                    }
+                });
+
+                // Populate division select if available
+                const firstTt = evolutionSteps[0].timetable_data;
+                if (firstTt && firstTt.divisions && firstTt.divisions.length > 0) {
+                    divisionSelect.innerHTML = firstTt.divisions.map(d => 
+                        `<option value="${d.id}">Division ${d.name || d.id}${d.classroom ? ' (' + d.classroom + ')' : ''}</option>`
+                    ).join("");
+                    activeDivision = firstTt.divisions[0].id;
+                }
+
+                // Initial render
+                renderChart();
+                updateStepUI(currentStepIndex);
+                loadAndRenderStep(currentStepIndex + 1);
+
+            } catch (err) {
+                console.error("Failed to load evolution data:", err);
+                timetableGridArea.innerHTML = `
+                    <div style="padding:20px; background:#fff3e0; border:1px solid #ffe0b2; border-radius:8px; color:#b78103;">
+                        <b>Evolution Data Not Found:</b> Run the solver to generate intermediate evolution steps.
+                    </div>`;
+            }
+        }
+
+        // Fetch step timetable from API /api/evolution/step/{n}
+        async function loadAndRenderStep(stepNum) {
+            if (stepTimetableCache[stepNum]) {
+                renderTimetableGrid(stepTimetableCache[stepNum]);
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/evolution/step/${stepNum}`);
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const ttData = await res.json();
+                stepTimetableCache[stepNum] = ttData;
+                renderTimetableGrid(ttData);
+            } catch (err) {
+                console.error(`Failed to fetch step ${stepNum}:`, err);
+                // Fallback to step object if available
+                if (evolutionSteps[stepNum - 1] && evolutionSteps[stepNum - 1].timetable_data) {
+                    renderTimetableGrid(evolutionSteps[stepNum - 1].timetable_data);
+                }
+            }
+        }
+
+        // Update step UI and stats bar
+        function updateStepUI(idx) {
+            currentStepIndex = idx;
+            const stepNum = idx + 1;
+            const stepData = evolutionSteps[idx];
+            if (!stepData) return;
+
+            slider.value = stepNum;
+            sliderLabel.textContent = `Step ${stepNum} / ${evolutionSteps.length}`;
+            stepBadge.textContent = `Step ${stepNum}`;
+            infoFaculty.textContent = stepData.faculty_score;
+            infoStudent.textContent = stepData.student_score;
+            infoResource.textContent = stepData.resource_score;
+            infoTotal.textContent = stepData.total_penalty;
+            infoTime.textContent = (stepData.elapsed_time || 0) + "s";
+
+            if (idx === 0) {
+                infoDelta.textContent = "Initial solution";
+                infoDelta.style.color = "#6B4226";
+                infoDelta.style.background = "#FAF7F2";
+            } else {
+                const prevP = evolutionSteps[idx - 1].total_penalty;
+                const delta = stepData.total_penalty - prevP;
+                infoDelta.textContent = `${delta <= 0 ? delta : '+' + delta} from previous`;
+                infoDelta.style.color = delta <= 0 ? "#2e7d32" : "#c62828";
+                infoDelta.style.background = delta <= 0 ? "#e8f5e9" : "#ffebee";
+            }
+
+            activeGridStepLabel.textContent = `Showing solution snapshot at Step ${stepNum} (Total Penalty: ${stepData.total_penalty})`;
+
+            renderChart(); // highlight selected dot
+        }
+
+        // Render division timetable grid
+        function renderTimetableGrid(ttData) {
+            if (!ttData || !ttData.divisions) {
+                timetableGridArea.innerHTML = "<p>No grid data for this step.</p>";
+                return;
+            }
+
+            const currentDiv = ttData.divisions.find(d => d.id === activeDivision) || ttData.divisions[0];
+            if (!currentDiv) {
+                timetableGridArea.innerHTML = "<p>Selected division not found.</p>";
+                return;
+            }
+
+            const days = ttData.days || DAYS;
+            const periods = ttData.periods || SLOTS.map((s, i) => ({period: i, start: s}));
+            const cells = currentDiv.cells || {};
+
+            let tableHtml = `<table class="timetable-grid">`;
+            tableHtml += `<thead><tr><th style="width:75px;">Time</th>`;
+            days.forEach(d => {
+                tableHtml += `<th>${d}</th>`;
+            });
+            tableHtml += `</tr></thead><tbody>`;
+
+            periods.forEach((p, pIdx) => {
+                const slotName = p.start || SLOTS[pIdx] || `H${pIdx + 1}`;
+                tableHtml += `<tr><td class="slot-name">${slotName}</td>`;
+
+                days.forEach((dayName, dIdx) => {
+                    const key = `${dIdx}_${pIdx}`;
+                    const entries = cells[key] || [];
+
+                    if (entries.length === 0) {
+                        tableHtml += `<td class="cell-empty"></td>`;
+                    } else if (entries[0].is_break || entries[0].course === "BREAK") {
+                        tableHtml += `<td class="cell-break">BREAK</td>`;
+                    } else {
+                        // Check if OE
+                        const isOE = entries.some(e => e.course === "OE" || (e.faculty_name && e.faculty_name.includes("Open Elective")));
+                        const isLab = entries.some(e => e.type === "Practical" || (e.course && e.course.toLowerCase().includes("lab")));
+                        
+                        let cellClass = "cell-theory";
+                        if (isOE) cellClass = "cell-oe";
+                        else if (isLab) cellClass = "cell-lab";
+
+                        let inner = entries.map(e => {
+                            const course = e.course || "—";
+                            const fac = e.faculty ? `<span class="fac">${e.faculty}</span>` : "";
+                            const rm = e.room ? `<span class="room-badge">@${e.room}</span>` : "";
+                            const batch = e.batch ? `<span class="batch-badge">${e.batch}</span>` : "";
+                            return `
+                                <div class="entry-item">
+                                    <div class="subj">${course}</div>
+                                    <div class="meta-line">${batch}${fac}${rm}</div>
+                                </div>
+                            `;
+                        }).join("");
+
+                        tableHtml += `<td class="${cellClass}">${inner}</td>`;
+                    }
+                });
+
+                tableHtml += `</tr>`;
+            });
+
+            tableHtml += `</tbody></table>`;
+            timetableGridArea.innerHTML = tableHtml;
+        }
+
+        // Section 2: Canvas Line Chart
+        function renderChart() {
+            if (!canvas || !evolutionSteps.length) return;
+            const ctx = canvas.getContext("2d");
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+
+            const width = rect.width;
+            const height = rect.height;
+
+            ctx.clearRect(0, 0, width, height);
+
+            const padding = { top: 30, right: 35, bottom: 40, left: 55 };
+            const chartW = width - padding.left - padding.right;
+            const chartH = height - padding.top - padding.bottom;
+
+            const n = evolutionSteps.length;
+            if (n === 0) return;
+
+            // Compute score range
+            let maxScore = 0;
+            evolutionSteps.forEach(s => {
+                if (s.total_penalty > maxScore) maxScore = s.total_penalty;
+                if (s.faculty_score > maxScore) maxScore = s.faculty_score;
+                if (s.student_score > maxScore) maxScore = s.student_score;
+            });
+            maxScore = Math.ceil(maxScore / 50) * 50 || 100;
+            if (maxScore < 100) maxScore = 100;
+
+            // X and Y mapping
+            const getX = (i) => padding.left + (n === 1 ? chartW / 2 : (i / (n - 1)) * chartW);
+            const getY = (val) => padding.top + chartH - (val / maxScore) * chartH;
+
+            // Draw Y-axis gridlines & labels
+            const yTicks = 6;
+            ctx.strokeStyle = "rgba(107, 66, 38, 0.12)";
+            ctx.fillStyle = "rgba(44, 26, 14, 0.65)";
+            ctx.font = "11px -apple-system, sans-serif";
+            ctx.textAlign = "right";
+            ctx.textBaseline = "middle";
+
+            for (let i = 0; i <= yTicks; i++) {
+                const val = Math.round((maxScore / yTicks) * i);
+                const y = getY(val);
+
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(width - padding.right, y);
+                ctx.stroke();
+
+                ctx.fillText(val, padding.left - 10, y);
+            }
+
+            // Draw X-axis ticks & labels
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+            evolutionSteps.forEach((s, i) => {
+                const x = getX(i);
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(107, 66, 38, 0.12)";
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartH);
+                ctx.stroke();
+
+                // Show step labels (all if <= 20, else every 2)
+                if (n <= 20 || (i + 1) % 2 === 1 || i === n - 1) {
+                    ctx.fillText(`${i + 1}`, x, padding.top + chartH + 8);
+                }
+            });
+
+            // Axis title for X
+            ctx.font = "bold 11px -apple-system, sans-serif";
+            ctx.fillStyle = "#6B4226";
+            ctx.fillText("Step Number", padding.left + chartW / 2, padding.top + chartH + 24);
+
+            // Helper to draw a line series
+            function drawSeries(key, color, lineWidth) {
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = lineWidth;
+                ctx.lineJoin = "round";
+
+                evolutionSteps.forEach((s, i) => {
+                    const x = getX(i);
+                    const y = getY(s[key] || 0);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+
+                // Draw dots
+                evolutionSteps.forEach((s, i) => {
+                    const x = getX(i);
+                    const y = getY(s[key] || 0);
+                    const isSelected = i === currentStepIndex;
+
+                    ctx.beginPath();
+                    ctx.arc(x, y, isSelected ? 6 : 4, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    ctx.strokeStyle = "#FFFFFF";
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                });
+            }
+
+            // Draw 3 lines: Total Penalty (#4A2C17), Faculty (#6B4226), Student (#C8A97E)
+            drawSeries("student_score", "#C8A97E", 2.2);
+            drawSeries("faculty_score", "#6B4226", 2.2);
+            drawSeries("total_penalty", "#4A2C17", 3.2);
+
+            // Highlight selected step column
+            const selX = getX(currentStepIndex);
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "rgba(74, 44, 23, 0.4)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(selX, padding.top);
+            ctx.lineTo(selX, padding.top + chartH);
+            ctx.stroke();
+            ctx.restore();
+
+            // Ring around selected total penalty point
+            const selTotY = getY(evolutionSteps[currentStepIndex].total_penalty);
+            ctx.beginPath();
+            ctx.arc(selX, selTotY, 9, 0, Math.PI * 2);
+            ctx.strokeStyle = "#4A2C17";
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+        }
+
+        // Interactive canvas events
+        function getStepIndexFromEvent(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const paddingLeft = 55;
+            const chartW = rect.width - 55 - 35;
+            const n = evolutionSteps.length;
+            if (n <= 1) return 0;
+
+            const ratio = (x - paddingLeft) / chartW;
+            let idx = Math.round(ratio * (n - 1));
+            if (idx < 0) idx = 0;
+            if (idx >= n) idx = n - 1;
+            return idx;
+        }
+
+        canvas.addEventListener("click", (e) => {
+            const idx = getStepIndexFromEvent(e);
+            updateStepUI(idx);
+            loadAndRenderStep(idx + 1);
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            const idx = getStepIndexFromEvent(e);
+            const step = evolutionSteps[idx];
+            if (!step) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            tooltip.style.display = "block";
+            tooltip.style.left = `${x}px`;
+            tooltip.style.top = `${y}px`;
+            tooltip.innerHTML = `
+                <div><b>Step ${idx + 1}</b> (${step.elapsed_time}s)</div>
+                <div>Total Penalty: <b>${step.total_penalty}</b></div>
+                <div>Faculty: <b>${step.faculty_score}</b> | Student: <b>${step.student_score}</b></div>
+            `;
+        });
+
+        canvas.addEventListener("mouseleave", () => {
+            tooltip.style.display = "none";
+        });
+
+        // Step Slider Event
+        slider.addEventListener("input", (e) => {
+            const stepNum = parseInt(e.target.value, 10);
+            updateStepUI(stepNum - 1);
+            loadAndRenderStep(stepNum);
+        });
+
+        // Prev / Next button events
+        prevStepBtn.addEventListener("click", () => {
+            if (currentStepIndex > 0) {
+                updateStepUI(currentStepIndex - 1);
+                loadAndRenderStep(currentStepIndex + 1);
+            }
+        });
+
+        nextStepBtn.addEventListener("click", () => {
+            if (currentStepIndex < evolutionSteps.length - 1) {
+                updateStepUI(currentStepIndex + 1);
+                loadAndRenderStep(currentStepIndex + 1);
+            }
+        });
+
+        // Auto-play button
+        autoPlayBtn.addEventListener("click", () => {
+            if (isPlaying) {
+                stopAutoPlay();
+            } else {
+                startAutoPlay();
+            }
+        });
+
+        function startAutoPlay() {
+            isPlaying = true;
+            autoPlayBtn.textContent = "⏸ Pause";
+            autoPlayBtn.style.background = "#c62828";
+
+            // If already at the end, restart from step 1
+            if (currentStepIndex >= evolutionSteps.length - 1) {
+                updateStepUI(0);
+                loadAndRenderStep(1);
+            }
+
+            playInterval = setInterval(() => {
+                if (currentStepIndex < evolutionSteps.length - 1) {
+                    const nextIdx = currentStepIndex + 1;
+                    updateStepUI(nextIdx);
+                    loadAndRenderStep(nextIdx + 1);
+                } else {
+                    // Loop once then stop at final step
+                    stopAutoPlay();
+                }
+            }, 1000);
+        }
+
+        function stopAutoPlay() {
+            isPlaying = false;
+            if (playInterval) {
+                clearInterval(playInterval);
+                playInterval = null;
+            }
+            autoPlayBtn.textContent = "▶ Play";
+            autoPlayBtn.style.background = "";
+        }
+
+        // Division dropdown change
+        divisionSelect.addEventListener("change", (e) => {
+            activeDivision = e.target.value;
+            loadAndRenderStep(currentStepIndex + 1);
+        });
+
+        // Window resize re-draws canvas cleanly
+        window.addEventListener("resize", () => {
+            renderChart();
+        });
+
+        // Simple placeholder for other legacy tabs if clicked
+        function renderLegacyTab(tab) {
+            const container = document.getElementById("grid-container");
+            container.innerHTML = `
+                <div style="background:#fff; border:1px solid rgba(107,66,38,0.2); border-radius:12px; padding:24px;">
+                    <h3 style="color:#6B4226; margin-top:0;">${tab.toUpperCase()} View</h3>
+                    <p style="color:var(--text-color); line-height:1.5;">
+                        This view is part of the original SY Sem IV reference suite. To explore complete institution branches, comparison solvers, and Pareto sweeps, visit the <a href="/platform" style="color:#6B4226; font-weight:700;">Platform</a>.
+                    </p>
+                    <p>To inspect the step-by-step solver progression, switch to the <b><a href="#" onclick="document.getElementById('tabBtnEvolution').click(); return false;" style="color:#6B4226;">Evolution Tab</a></b>.</p>
+                </div>
+            `;
+        }
+
+        // Start initialization
+        document.addEventListener("DOMContentLoaded", initEvolution);
+    })();
+    </script>
+</body>
+</html>

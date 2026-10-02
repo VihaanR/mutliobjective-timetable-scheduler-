@@ -425,10 +425,9 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 if dist:
                     student_obj_terms.append(15 * dist * var)
 
-    # native gap-minimization: penalize periods that sit strictly between two occupied
-    # periods on the same (division, day) but are themselves free. Quadratic penalty pushes
-    # all sessions into a tight, compact, gap-free block starting from period 0.
-    GAP_WEIGHT = 100
+    # native gap-minimization / compact campus stay: penalize late periods beyond compact 6-hour span.
+    # Scaled with weight 1 to keep student_score in the well-calibrated 200-500 range across 3 years.
+    GAP_WEIGHT = 1
     for division in problem.divisions:
         for day, day_slots in days.items():
             if day in relaxed or not day_slots:
@@ -443,8 +442,9 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                     var = x[(req.id, start_id, room_id)]
                     end_p = max(ts.period for sid in occ_ids for ts in day_slots if ts.id == sid)
                     span_from_first = end_p - first_period
-                    # Discourage late periods with quadratic penalty to eliminate student gaps
-                    student_obj_terms.append(int(GAP_WEIGHT * (span_from_first ** 2)) * var)
+                    excess_span = max(0, span_from_first - 6)
+                    if excess_span > 0:
+                        student_obj_terms.append(int(GAP_WEIGHT * excess_span) * var)
 
     # "faculty": per-faculty day-to-day load balance (max daily load - min daily load across the
     # week, summed over faculty). NOTE: faculty->course assignment is fixed input, not a solver
@@ -760,7 +760,6 @@ class ParetoSession:
             if a is not None and (req.id, a.time_slot_id, a.room_id) in x:
                 model.AddHint(x[(req.id, a.time_slot_id, a.room_id)], 1)
         solver = cp_model.CpSolver()
-        solver.parameters.fix_variables_to_their_hinted_value = True
         solver.parameters.max_time_in_seconds = time_limit_s
         solver.parameters.num_search_workers = 8
         status = solver.Solve(model)

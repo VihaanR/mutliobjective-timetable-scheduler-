@@ -46,10 +46,16 @@ on("deptSelect", "change", () => { rebuildClassSelectors(); checkReadiness(); })
 on("yearSelect", "change", () => { rebuildClassSelectors(); checkReadiness(); });
 on("semSelect", "change", () => { renderResolvedBranch(); checkReadiness(); });
 
-on("generateBtn", "click", () => generate("selected"));
-on("generateOddYearsBtn", "click", () => generate("odd"));
-on("generateEvenYearsBtn", "click", () => generate("even"));
-on("generateAllYearsBtn", "click", () => generate("all"));
+on("generateTimetableBtn", "click", openGenScopeModal);
+on("closeGenScopeModalBtn", "click", closeGenScopeModal);
+on("genOptOddSem", "click", () => { closeGenScopeModal(); generate("odd"); });
+on("genOptEvenSem", "click", () => { closeGenScopeModal(); generate("even"); });
+on("genSpecificBtn", "click", () => {
+  const selVal = parseInt($("genSpecificBranchSelect").value);
+  closeGenScopeModal();
+  generate("specific", selVal);
+});
+on("genOptAllLoaded", "click", () => { closeGenScopeModal(); generate("all"); });
 
 // Pareto section button listeners
 on("paretoStreamBtn", "click", openParetoScopeModal);
@@ -288,25 +294,59 @@ async function checkReadiness() {
   }
 }
 
-// ---------------------------------------------------------------- 4. generate timetable
-async function generate(mode = "selected") {
-  const btn = $("generateBtn");
-  const oddB = $("generateOddYearsBtn");
-  const evenB = $("generateEvenYearsBtn");
-  const allB = $("generateAllYearsBtn");
+// ---------------------------------------------------------------- 4. generate timetable modal & runner
+function openGenScopeModal() {
+  const modal = $("genScopeModal");
+  if (!modal) return;
+  const sel = $("genSpecificBranchSelect");
+  if (sel) {
+    if (allBranches && allBranches.length > 0) {
+      sel.innerHTML = allBranches.map(b => {
+        const semTxt = b.semester ? ` (Sem ${b.semester})` : "";
+        const nameTxt = b.name ? ` — ${b.name}` : "";
+        return `<option value="${b.id}">${b.code}${semTxt}${nameTxt}</option>`;
+      }).join("");
+      const curr = selectedBranch();
+      if (curr && allBranches.some(b => b.id === curr.id)) {
+        sel.value = curr.id;
+      }
+    } else {
+      sel.innerHTML = `<option value="">No classes loaded — load in step 1</option>`;
+    }
+  }
+  modal.style.display = "flex";
+}
+
+function closeGenScopeModal() {
+  const modal = $("genScopeModal");
+  if (modal) modal.style.display = "none";
+}
+
+async function generate(mode = "selected", specificBranchId = null) {
+  const btn = $("generateTimetableBtn");
+  const stopBtn = $("genStopBtn");
   const statusEl = $("genStatus");
 
-  [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = true; });
+  if (btn) btn.disabled = true;
   clearTimeout(pollTimer);
 
   let branch_ids = null;
   let label = "All Loaded Datasets";
 
-  if (mode === "selected") {
+  if (mode === "specific" && specificBranchId) {
+    const b = branchesById[specificBranchId] || allBranches.find(x => x.id === specificBranchId);
+    if (!b) {
+      statusEl.textContent = "Selected class not found.";
+      if (btn) btn.disabled = false;
+      return;
+    }
+    branch_ids = [b.id];
+    label = b.code;
+  } else if (mode === "selected") {
     const b = selectedBranch();
     if (!b) {
-      statusEl.textContent = "no class selected — pick one in step 2.";
-      [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      statusEl.textContent = "no class selected — pick one in step 2 or select from modal.";
+      if (btn) btn.disabled = false;
       return;
     }
     branch_ids = [b.id];
@@ -315,7 +355,7 @@ async function generate(mode = "selected") {
     const oddBranches = allBranches.filter(b => [1, 3, 5, 7].includes(b.semester));
     if (oddBranches.length === 0) {
       statusEl.textContent = "no odd-semester datasets loaded.";
-      [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (btn) btn.disabled = false;
       return;
     }
     branch_ids = oddBranches.map(b => b.id);
@@ -324,7 +364,7 @@ async function generate(mode = "selected") {
     const evenBranches = allBranches.filter(b => [2, 4, 6, 8].includes(b.semester));
     if (evenBranches.length === 0) {
       statusEl.textContent = "no even-semester datasets loaded.";
-      [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (btn) btn.disabled = false;
       return;
     }
     branch_ids = evenBranches.map(b => b.id);
@@ -341,7 +381,6 @@ async function generate(mode = "selected") {
     branch_ids,
   };
 
-  const stopBtn = $("genStopBtn");
   if (stopBtn) stopBtn.style.display = "inline-flex";
 
   statusEl.className = "status-line active-gen";
@@ -356,7 +395,7 @@ async function generate(mode = "selected") {
     if (res.status === 409) {
       statusEl.className = "status-line";
       statusEl.textContent = "a solve is already in progress — wait for it to finish.";
-      [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.style.display = "none";
       return;
     }
@@ -365,7 +404,7 @@ async function generate(mode = "selected") {
       const msg = body.detail ? (Array.isArray(body.detail) ? body.detail.join("; ") : String(body.detail)) : ("HTTP " + res.status);
       statusEl.className = "status-line";
       statusEl.textContent = "generation failed: " + msg;
-      [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+      if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.style.display = "none";
       return;
     }
@@ -375,19 +414,16 @@ async function generate(mode = "selected") {
   } catch (e) {
     statusEl.className = "status-line";
     statusEl.textContent = "error submitting run: " + (e.message || e);
-    [btn, oddB, evenB, allB].forEach(btnEl => { if (btnEl) btnEl.disabled = false; });
+    if (btn) btn.disabled = false;
     if (stopBtn) stopBtn.style.display = "none";
   }
 }
 
 function stopGenerate() {
   clearTimeout(pollTimer);
-  const btn = $("generateBtn");
-  const oddB = $("generateOddYearsBtn");
-  const evenB = $("generateEvenYearsBtn");
-  const allB = $("generateAllYearsBtn");
+  const btn = $("generateTimetableBtn");
   const stopBtn = $("genStopBtn");
-  [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+  if (btn) btn.disabled = false;
   if (stopBtn) stopBtn.style.display = "none";
   const statusEl = $("genStatus");
   if (statusEl) {
@@ -397,10 +433,7 @@ function stopGenerate() {
 }
 
 function pollRun(runId, label) {
-  const btn = $("generateBtn");
-  const oddB = $("generateOddYearsBtn");
-  const evenB = $("generateEvenYearsBtn");
-  const allB = $("generateAllYearsBtn");
+  const btn = $("generateTimetableBtn");
   const stopBtn = $("genStopBtn");
   const statusEl = $("genStatus");
 
@@ -413,7 +446,7 @@ function pollRun(runId, label) {
         pollTimer = setTimeout(() => pollRun(runId, label), 1500);
         return;
       }
-      [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+      if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.style.display = "none";
       statusEl.className = "status-line";
       if (run.status === "done") {
@@ -445,7 +478,7 @@ function pollRun(runId, label) {
     .catch((e) => {
       statusEl.className = "status-line";
       statusEl.textContent = "error polling run: " + (e.message || e);
-      [btn, oddB, evenB, allB].forEach(b => { if (b) b.disabled = false; });
+      if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.style.display = "none";
     });
 }

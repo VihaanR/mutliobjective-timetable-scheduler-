@@ -661,9 +661,10 @@ function enableExport(runId) {
 // ---------------------------------------------------------------- 5. Multi-Objective Pareto & Epsilon Streaming
 function selectedParetoPairs() {
   const pairs = [];
-  if ($("parFacStu") && $("parFacStu").checked) pairs.push(["faculty", "students"]);
   if ($("parStuFac") && $("parStuFac").checked) pairs.push(["students", "faculty"]);
-  if ($("parLabStu") && $("parLabStu").checked) pairs.push(["labs", "students"]);
+  if ($("parFacStu") && $("parFacStu").checked) pairs.push(["faculty", "students"]);
+  if ($("parResStu") && $("parResStu").checked) pairs.push(["resource", "students"]);
+  else if ($("parLabStu") && $("parLabStu").checked) pairs.push(["resource", "students"]);
   return pairs;
 }
 
@@ -824,16 +825,19 @@ async function startParetoStreaming(mode = "odd") {
       buffer = chunks.pop() || "";
 
       for (const chunk of chunks) {
-        const line = chunk.trim();
-        if (!line.startsWith("data:")) continue;
-        const rawJson = line.replace(/^data:\s*/, "");
-        if (!rawJson) continue;
+        const lines = chunk.split("\n");
+        for (let line of lines) {
+          line = line.trim();
+          if (!line.startsWith("data:")) continue;
+          const rawJson = line.replace(/^data:\s*/, "");
+          if (!rawJson) continue;
 
-        try {
-          const event = JSON.parse(rawJson);
-          handleParetoStreamEvent(event);
-        } catch (err) {
-          console.warn("SSE JSON parse error:", err);
+          try {
+            const event = JSON.parse(rawJson);
+            handleParetoStreamEvent(event);
+          } catch (err) {
+            console.warn("SSE JSON parse error:", err);
+          }
         }
       }
     }
@@ -1572,6 +1576,175 @@ function renderHistoryTable() {
   });
 }
 
+// ---------------------------------------------------------------- 3. Room & Lab Availability Finder
+function initAvailabilityDate() {
+  const dateInput = $("availDateInput");
+  if (dateInput && !dateInput.value) {
+    const today = new Date().toISOString().split("T")[0];
+    dateInput.value = today;
+  }
+}
+
+on("availDateInput", "change", checkRoomAvailability);
+
+["availTimeStart", "availTimeEnd"].forEach((id) => {
+  on(id, "keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      checkRoomAvailability();
+    }
+  });
+});
+
+on("checkAvailBtn", "click", checkRoomAvailability);
+
+on("toggleOccupiedBtn", "click", () => {
+  const grid = $("occupiedRoomsGrid");
+  const btn = $("toggleOccupiedBtn");
+  if (!grid || !btn) return;
+  const isHidden = grid.style.display === "none";
+  grid.style.display = isHidden ? "grid" : "none";
+  btn.textContent = isHidden ? "Hide Occupied Details" : "Show Occupied Details";
+});
+
+async function checkRoomAvailability() {
+  const dateVal = $("availDateInput")?.value || "";
+  const startTime = $("availTimeStart")?.value?.trim() || "8:00 AM";
+  const endTime = $("availTimeEnd")?.value?.trim() || "10:00 AM";
+
+  const alertEl = $("availStatusAlert");
+  const resultsEl = $("availResultsContainer");
+  const btn = $("checkAvailBtn");
+
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/rooms/availability", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: dateVal || undefined,
+        start_time: startTime || undefined,
+        end_time: endTime || undefined,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data.valid) {
+      if (alertEl) {
+        alertEl.style.display = "flex";
+        alertEl.className = "room-avail-status-alert invalid";
+        alertEl.innerHTML = `<span>⚠️ <b>Invalid timeslot:</b> ${esc(data.message || "Invalid timeslot. Operating hours are 8:00 AM to 7:00 PM.")}</span>`;
+      }
+      if (resultsEl) resultsEl.style.display = "none";
+      return;
+    }
+
+    // Valid response
+    const dateLabel = data.date ? `${data.date} (${data.day})` : data.day;
+    if (alertEl) {
+      alertEl.style.display = "flex";
+      alertEl.className = "room-avail-status-alert valid";
+      alertEl.innerHTML = `<span>✅ <b>Timeslot Verified:</b> ${esc(dateLabel)} ${esc(data.time_range_display)} &mdash; <b>${data.summary.available_classrooms_count} Classrooms</b> &amp; <b>${data.summary.available_labs_count} Labs</b> available.</span>`;
+    }
+
+    if (resultsEl) resultsEl.style.display = "block";
+
+    // Summary stats
+    if ($("statAvailClassrooms")) $("statAvailClassrooms").textContent = data.summary.available_classrooms_count;
+    if ($("statAvailLabs")) $("statAvailLabs").textContent = data.summary.available_labs_count;
+    if ($("statOccupiedRooms")) $("statOccupiedRooms").textContent = data.summary.total_occupied_count;
+    if ($("statTotalRooms")) $("statTotalRooms").textContent = data.summary.total_rooms;
+
+    if ($("availClassroomsCount")) $("availClassroomsCount").textContent = data.summary.available_classrooms_count;
+    if ($("availLabsCount")) $("availLabsCount").textContent = data.summary.available_labs_count;
+    if ($("occupiedRoomsCount")) $("occupiedRoomsCount").textContent = data.summary.total_occupied_count;
+
+    // Render Available Classrooms
+    const cGrid = $("availClassroomsGrid");
+    if (cGrid) {
+      if (data.available_classrooms.length === 0) {
+        cGrid.innerHTML = `<div style="grid-column: 1/-1; padding: 14px; color: var(--muted); font-size: 13px;">No classrooms are available in this timeslot.</div>`;
+      } else {
+        cGrid.innerHTML = data.available_classrooms.map((r) => `
+          <div class="room-item-card free">
+            <div class="room-card-head">
+              <span class="room-card-code">${esc(r.code)}</span>
+              <span class="room-badge free">Available</span>
+            </div>
+            <div class="room-card-name">${esc(r.name)}</div>
+            <div class="room-card-meta">
+              <span>👥 Cap: <b>${r.capacity}</b></span>
+              <span>🏢 ${esc(r.building || "Main")} · ${esc(r.floor || "Floor 1")}</span>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+    // Render Available Labs
+    const lGrid = $("availLabsGrid");
+    if (lGrid) {
+      if (data.available_labs.length === 0) {
+        lGrid.innerHTML = `<div style="grid-column: 1/-1; padding: 14px; color: var(--muted); font-size: 13px;">No labs are available in this timeslot.</div>`;
+      } else {
+        lGrid.innerHTML = data.available_labs.map((r) => `
+          <div class="room-item-card free">
+            <div class="room-card-head">
+              <span class="room-card-code" style="color:#0f766e;">${esc(r.code)}</span>
+              <span class="room-badge free" style="background:#ccfbf1; color:#0f766e;">Available Lab</span>
+            </div>
+            <div class="room-card-name">${esc(r.name)}</div>
+            <div class="room-card-meta">
+              <span>👥 Cap: <b>${r.capacity}</b></span>
+              <span>🔬 ${esc(r.building || "Lab Wing")} · ${esc(r.floor || "Floor 2")}</span>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+    // Render Occupied Rooms
+    const oGrid = $("occupiedRoomsGrid");
+    if (oGrid) {
+      const occupiedList = [...data.occupied_classrooms, ...data.occupied_labs];
+      if (occupiedList.length === 0) {
+        oGrid.innerHTML = `<div style="grid-column: 1/-1; padding: 14px; color: var(--good); font-size: 13px; font-weight:600;">✨ All rooms and labs are completely free during this period!</div>`;
+      } else {
+        oGrid.innerHTML = occupiedList.map((r) => {
+          const occItems = r.occupancy.map((occ) => `
+            <div class="room-occupancy-item">
+              <b>${esc(occ.period_time)}</b>: ${esc(occ.course)} (${esc(occ.type)}) &middot; <i>${esc(occ.faculty)}</i> ${occ.class_label ? `[${esc(occ.class_label)}]` : ""}
+            </div>
+          `).join("");
+          return `
+            <div class="room-item-card busy">
+              <div class="room-card-head">
+                <span class="room-card-code">${esc(r.code)}</span>
+                <span class="room-badge busy">Occupied</span>
+              </div>
+              <div class="room-card-name">${esc(r.name)} (${esc(r.room_type)})</div>
+              <div class="room-occupancy-info">
+                ${occItems}
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+
+  } catch (err) {
+    if (alertEl) {
+      alertEl.style.display = "flex";
+      alertEl.className = "room-avail-status-alert invalid";
+      alertEl.innerHTML = `<span>⚠️ <b>Network / Server Error:</b> ${esc(err.message || String(err))}</span>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ---------------------------------------------------------------- Auth nav
 async function loadNavUser() {
   try {
@@ -1591,6 +1764,8 @@ $("logoutBtn").addEventListener("click", async () => {
 
 // ---------------------------------------------------------------- init
 loadNavUser();
+initAvailabilityDate();
 loadSeedDatasets();
 loadBranches();
 loadHistory();
+checkRoomAvailability();

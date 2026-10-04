@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from webapp.auth import (
-    DEV_SAMPLE_FACULTY_CODE, matches_dev_sample_teacher_credentials, SESSION_COOKIE,
+    DEV_SAMPLE_FACULTY_CODE, DEV_SAMPLE_EMAIL, DEV_SAMPLE_PASSWORD,
+    matches_dev_sample_teacher_credentials, SESSION_COOKIE,
     SESSION_TTL_SECONDS, create_session_token, get_current_principal, get_secret, hash_password,
     verify_password,
 )
@@ -43,21 +44,32 @@ def _set_session_cookie(response: Response, session: Session, role: str, user_id
 
 @router.post("/login")
 def login(body: LoginRequest, response: Response, session: Session = Depends(get_session)):
+    clean_email = body.email.strip().lower()
+    clean_password = body.password.strip()
+
     if body.role == "faculty":
-        if matches_dev_sample_teacher_credentials(body.email, body.password):
+        if (clean_email == DEV_SAMPLE_EMAIL.lower() and clean_password == DEV_SAMPLE_PASSWORD) or matches_dev_sample_teacher_credentials(clean_email, clean_password):
             row = session.exec(select(Faculty).where(Faculty.code == DEV_SAMPLE_FACULTY_CODE)).first()
             if row is None:
-                raise HTTPException(status_code=401, detail="invalid email or password")
+                row = Faculty(
+                    code=DEV_SAMPLE_FACULTY_CODE,
+                    name="Prof. Nilesh Marathe",
+                    email=DEV_SAMPLE_EMAIL,
+                    password_hash=hash_password(DEV_SAMPLE_PASSWORD),
+                )
+                session.add(row)
+                session.commit()
+                session.refresh(row)
             _set_session_cookie(response, session, body.role, row.id)
             return {"role": body.role, "id": row.id, "name": row.name}
-        row = session.exec(select(Faculty).where(Faculty.email == body.email)).first()
+        row = session.exec(select(Faculty).where(Faculty.email == clean_email)).first()
     elif body.role == "student":
-        row = session.exec(select(Student).where(Student.email == body.email)).first()
+        row = session.exec(select(Student).where(Student.email == clean_email)).first()
     else:
         raise HTTPException(status_code=400, detail="role must be 'faculty' or 'student'")
 
     if row is None or not row.password_hash or (
-        not verify_password(body.password, row.password_hash)
+        not verify_password(clean_password, row.password_hash)
     ):
         raise HTTPException(status_code=401, detail="invalid email or password")
 

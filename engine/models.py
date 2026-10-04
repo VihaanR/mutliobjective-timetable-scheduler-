@@ -180,6 +180,7 @@ class ProblemInstance:
     #     every existing test and caller is unaffected (additive-only convention). ---
     blocked_slot_ids: frozenset[int] = field(default_factory=frozenset)   # slots nothing may occupy
                                                                           # (e.g. rain/holiday window)
+    blocked_room_slots: frozenset[tuple[str, int]] = field(default_factory=frozenset) # (room_id, slot_id) pairs blocked
     relaxed_days: frozenset[int] = field(default_factory=frozenset)       # days exempt from the
                                                                           # day-shaped hard rules
                                                                           # (daily load 6-8, labs-

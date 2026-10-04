@@ -16,7 +16,7 @@ import json
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 
 from webapp.auth import get_current_principal
@@ -26,6 +26,7 @@ from webapp.routers import (
     auth as auth_router, branches, faculty, courses, rooms, allocations, slots, runs, calendar,
     students, pareto,
 )
+from webapp.models_db import Branch
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"

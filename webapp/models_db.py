@@ -12,11 +12,15 @@ The base doubles as the response schema.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 # --------------------------------------------------------------------------- branch
@@ -234,7 +238,7 @@ class TimetableRun(SQLModel, table=True):
     solver: str
     time_limit: float
     status: str = "queued"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     problem_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
     # Which branches this run actually covered. An EMPTY list means the whole institution (every
     # branch) -- the same convention `problem_builder.build_problem_dict(branch_ids=None)` uses.
@@ -267,7 +271,7 @@ class ParetoRun(SQLModel, table=True):
     time_limit_s: float = 30.0
     sweep_points: int = 5
     status: str = "queued"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
     points: Optional[dict] = Field(default=None, sa_column=Column(JSON))  # {pair_label: [point, ...]}
     error: Optional[str] = None
 
@@ -310,7 +314,7 @@ class CalendarUploadBase(SQLModel):
 
 class CalendarUpload(CalendarUploadBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = Field(default_factory=utc_now)
 
 
 # --------------------------------------------------------------------------- calendar_event (P3)
@@ -400,4 +404,4 @@ class ManualEdit(SQLModel, table=True):
     to_room_id: str
     edited_by_faculty_id: Optional[int] = None   # DB Faculty.id (int PK) - not the engine code
     status: str = "active"                        # "active" | "reverted"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)

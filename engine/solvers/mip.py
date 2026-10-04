@@ -304,20 +304,40 @@ class MIPSolver(SolverBase):
                     if window_terms:
                         solver.Add(sum(window_terms) <= cap)
 
-        # each division's day must START at the first period (08:00) -- no empty leading slot.
-        # A session covers period 0 iff its start slot IS the day's first slot.
-        first_slot_id_by_day = {day: day_slots[0].id for day, day_slots in slots_by_day.items() if day_slots}
-        first_slot_terms: dict = {}
+        # all occupancy (teaching sessions + breaks) per (division_id, slot_id)
+        division_all_terms: dict = {}
+        seen_all_groups: set[str] = set()
         for req in requirements:
-            if req.is_break:
-                continue
-            for (start_id, _occ, day, room_id, _cost) in candidates[req.id]:
-                if start_id == first_slot_id_by_day.get(day):
-                    first_slot_terms.setdefault((req.division_id, day), []).append(x[(req.id, start_id, room_id)])
-        for (division_id, day), terms in first_slot_terms.items():
-            if day in relaxed:
-                continue
-            solver.Add(sum(terms) >= 1)
+            if req.batch_group_id:
+                if req.batch_group_id in seen_all_groups:
+                    continue
+                seen_all_groups.add(req.batch_group_id)
+            for (start_id, occ_ids, day, room_id, _cost) in candidates[req.id]:
+                var = x[(req.id, start_id, room_id)]
+                for sid in occ_ids:
+                    division_all_terms.setdefault((req.division_id, sid), []).append(var)
+
+        # each division's day must START at the first period (08:00) and form a strictly CONTIGUOUS block (ZERO IDLE GAPS)
+        for division in problem.divisions:
+            for day, day_slots in slots_by_day.items():
+                if day in relaxed or not day_slots:
+                    continue
+                div_occ_vars = []
+                for ts in day_slots:
+                    terms = division_all_terms.get((division.id, ts.id), [])
+                    if terms:
+                        occ = solver.BoolVar(f"div_occ_{division.id}_{day}_{ts.period}")
+                        solver.Add(occ == sum(terms))
+                        div_occ_vars.append(occ)
+                    else:
+                        occ = solver.BoolVar(f"div_occ_{division.id}_{day}_{ts.period}")
+                        solver.Add(occ == 0)
+                        div_occ_vars.append(occ)
+
+                if div_occ_vars:
+                    solver.Add(div_occ_vars[0] == 1)
+                    for p in range(len(div_occ_vars) - 1):
+                        solver.Add(div_occ_vars[p + 1] <= div_occ_vars[p])
 
         # no all-theory day: each day must have >=1 practical or skill-category session,
         # but only for divisions that have at least as many practicals as teaching days

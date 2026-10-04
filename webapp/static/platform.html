@@ -103,6 +103,90 @@
     <div id="branchNotices"></div>
   </section>
 
+  <section class="panel-section room-avail-panel" id="roomAvailSection">
+    <div class="room-avail-header">
+      <div>
+        <h2>🏫 3. Room &amp; Lab Availability Finder</h2>
+        <p class="notes" style="margin-top:4px;">Check available classrooms and labs for any selected date and timeslot.</p>
+      </div>
+    </div>
+
+    <div class="room-avail-controls">
+      <div class="control">
+        <label>Date</label>
+        <input type="date" id="availDateInput">
+      </div>
+
+      <div class="control" style="flex:1; min-width:280px;">
+        <label>Timeslot</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="text" id="availTimeStart" value="8:00 AM" placeholder="8:00 AM" style="flex:1; font-weight:700; color:var(--accent);">
+          <span style="font-weight:700; color:var(--muted); font-size:16px;">-</span>
+          <input type="text" id="availTimeEnd" value="10:00 AM" placeholder="10:00 AM" style="flex:1; font-weight:700; color:var(--accent);">
+        </div>
+      </div>
+
+      <button type="button" id="checkAvailBtn" style="background:linear-gradient(135deg, #0f766e, #0d9488); color:#fff; font-weight:700; padding:10px 20px; border-radius:8px; border:none; cursor:pointer; box-shadow:0 4px 12px rgba(13,148,136,0.3); font-size:13.5px; display:inline-flex; align-items:center; gap:6px;">
+        🔍 Check Availability
+      </button>
+    </div>
+
+    <!-- Status / Error Alert Banner -->
+    <div id="availStatusAlert" class="room-avail-status-alert" style="display:none;"></div>
+
+    <!-- Results Container -->
+    <div id="availResultsContainer" style="display:none;">
+      <!-- Stats Summary -->
+      <div class="room-stats-summary">
+        <div class="room-stat-card avail-classrooms">
+          <span class="val" id="statAvailClassrooms">0</span>
+          <span class="lbl">Available Classrooms</span>
+        </div>
+        <div class="room-stat-card avail-labs">
+          <span class="val" id="statAvailLabs">0</span>
+          <span class="lbl">Available Labs</span>
+        </div>
+        <div class="room-stat-card occupied-total">
+          <span class="val" id="statOccupiedRooms">0</span>
+          <span class="lbl">Occupied Rooms / Labs</span>
+        </div>
+        <div class="room-stat-card all-total">
+          <span class="val" id="statTotalRooms">0</span>
+          <span class="lbl">Total Capacity Examined</span>
+        </div>
+      </div>
+
+      <div class="room-grids-container">
+        <!-- Available Classrooms -->
+        <div class="room-section-box">
+          <div class="room-section-box-title">
+            <span>🏛️ Available Classrooms (<span id="availClassroomsCount">0</span>)</span>
+            <span class="tag" style="background:#dcfce7; color:#15803d; font-weight:700;">Unoccupied</span>
+          </div>
+          <div class="room-cards-grid" id="availClassroomsGrid"></div>
+        </div>
+
+        <!-- Available Labs -->
+        <div class="room-section-box">
+          <div class="room-section-box-title">
+            <span>🔬 Available Labs (<span id="availLabsCount">0</span>)</span>
+            <span class="tag" style="background:#ccfbf1; color:#0f766e; font-weight:700;">Unoccupied</span>
+          </div>
+          <div class="room-cards-grid" id="availLabsGrid"></div>
+        </div>
+
+        <!-- Occupied Rooms (Collapsible) -->
+        <div class="room-section-box" style="background:#fffcfc; border-color:#fee2e2;">
+          <div class="room-section-box-title">
+            <span>🔒 Occupied Rooms &amp; Labs (<span id="occupiedRoomsCount">0</span>)</span>
+            <button type="button" id="toggleOccupiedBtn" class="preset-chip" style="font-size:11px;">Show Occupied Details</button>
+          </div>
+          <div class="room-cards-grid" id="occupiedRoomsGrid" style="display:none;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="panel-section" id="genSection">
     <h2>4. Generate Timetable</h2>
     <div class="controls" style="flex-wrap: wrap; gap: 12px; align-items: flex-end;">
@@ -195,7 +279,7 @@
         <div class="compare-checks">
           <label><input type="checkbox" id="parStuFac" checked> 1st: Min Faculty (Bound Students)</label>
           <label><input type="checkbox" id="parFacStu" checked> 2nd: Min Students (Bound Faculty)</label>
-          <label><input type="checkbox" id="parLabStu" checked> 3rd: Min Students (Bound Resource/Labs)</label>
+          <label><input type="checkbox" id="parResStu" checked> 3rd: Min Students (Bound Resource: Labs + Rooms)</label>
         </div>
       </div>
       <div class="control">

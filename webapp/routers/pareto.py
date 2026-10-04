@@ -22,7 +22,7 @@ from engine.pareto_sweep import (
 from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.jobs import run_pareto_job
-from webapp.models_db import ParetoRun, TimetableRun
+from webapp.models_db import ParetoRun, TimetableRun, utc_now
 from webapp.problem_builder import build_division_meta, readiness, spans_multiple_branches
 
 router = APIRouter(prefix="/api", tags=["pareto"])
@@ -80,7 +80,7 @@ async def stream_pareto(
     division_meta = build_division_meta(session, body.branch_ids)
     pairs = [tuple(p) for p in body.pairs] if body.pairs else DEFAULT_PAIRS
 
-    valid_categories = {"rooms", "labs", "students", "faculty"}
+    valid_categories = {"rooms", "labs", "students", "faculty", "resource"}
     bad_pairs = [p for p in pairs if len(p) != 2 or not valid_categories.issuperset(p)]
     if bad_pairs:
         raise HTTPException(
@@ -120,20 +120,8 @@ async def stream_pareto(
             finally:
                 loop.call_soon_threadsafe(aio_q.put_nowait, SENTINEL)
 
-        # Background disconnect-poller: checks every 0.5 s if client left
-        async def disconnect_watcher():
-            while not cancel_event.is_set():
-                try:
-                    if await request.is_disconnected():
-                        cancel_event.set()
-                        break
-                except Exception:
-                    break
-                await asyncio.sleep(0.5)
-
         worker_thread = threading.Thread(target=thread_worker, daemon=True)
         worker_thread.start()
-        watcher_task = asyncio.ensure_future(disconnect_watcher())
 
         try:
             # First event: send the token so the client can call /stop
@@ -143,8 +131,10 @@ async def stream_pareto(
                 try:
                     item = await asyncio.wait_for(aio_q.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    if not worker_thread.is_alive():
+                    if not worker_thread.is_alive() and aio_q.empty():
                         break
+                    # Keep-alive comment heartbeat: keeps TCP/HTTP stream active across proxies and browsers
+                    yield ": ping\n\n"
                     continue
 
                 if item is SENTINEL:
@@ -162,7 +152,7 @@ async def stream_pareto(
                                 time_limit_s=body.time_limit_s,
                                 sweep_points=body.sweep_points,
                                 status="done",
-                                created_at=datetime.utcnow(),
+                                created_at=utc_now(),
                                 points={
                                     "points": event.get("points", []),
                                     "payoff_tables": event.get("payoff_tables", {}),
@@ -179,14 +169,13 @@ async def stream_pareto(
                 payload = json.dumps(event, default=str)
                 yield f"data: {payload}\n\n"
 
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             cancel_event.set()
         except Exception as exc:
             err_payload = json.dumps({"type": "error", "error": str(exc)})
             yield f"data: {err_payload}\n\n"
         finally:
             cancel_event.set()
-            watcher_task.cancel()
             _active_sweeps.pop(token, None)
 
     return StreamingResponse(
@@ -223,7 +212,7 @@ def save_sweep_as_run(
         time_limit_s=body.time_limit_s,
         sweep_points=body.sweep_points,
         status="done",
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
         points={
             "points": body.points,
             "payoff_tables": body.payoff_tables,
@@ -254,7 +243,7 @@ def save_point_as_run(
         hard=body.hard,
         soft=body.soft,
         wall_clock=body.wall_clock,
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
     session.add(run)
     session.commit()
@@ -275,7 +264,7 @@ def start_pareto_sweep(
         raise HTTPException(status_code=400, detail=issues)
 
     pairs = [tuple(p) for p in body.pairs] if body.pairs else DEFAULT_PAIRS
-    valid_categories = {"rooms", "labs", "students", "faculty"}
+    valid_categories = {"rooms", "labs", "students", "faculty", "resource"}
     bad_pairs = [p for p in pairs if len(p) != 2 or not valid_categories.issuperset(p)]
     if bad_pairs:
         raise HTTPException(

@@ -259,6 +259,36 @@
         <div id="slotTable"></div>
       </section>
     </div>
+
+    <div class="grid" style="margin-top: 18px;">
+      <section class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <h2 style="margin:0;">🏫 Room &amp; Lab Availability Finder</h2>
+            <p class="hint" style="margin:4px 0 0;">Check unoccupied classrooms and labs for any selected date and timeslot.</p>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:14px; background:var(--panel-soft); padding:14px; border-radius:14px;">
+          <div class="field" style="min-width:140px;">
+            <label>Date</label>
+            <input type="date" id="dashAvailDate">
+          </div>
+          <div class="field" style="flex:1; min-width:280px;">
+            <label>Timeslot</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input id="dashAvailStart" value="8:00 AM" placeholder="8:00 AM" style="flex:1; font-weight:700; color:var(--accent);">
+              <span style="font-weight:700; color:var(--muted); font-size:16px;">-</span>
+              <input id="dashAvailEnd" value="10:00 AM" placeholder="10:00 AM" style="flex:1; font-weight:700; color:var(--accent);">
+            </div>
+          </div>
+          <button type="button" id="dashCheckAvailBtn" class="primary" style="padding:11px 20px;">🔍 Check Availability</button>
+        </div>
+
+        <div id="dashAvailStatus" style="margin-top:10px; font-weight:600; font-size:13.5px;"></div>
+        <div id="dashAvailResults" style="margin-top:14px; display:none;"></div>
+      </section>
+    </div>
   </div>
 
   <script>
@@ -893,6 +923,80 @@
                         "allocationStatus", "roomStatus", "slotStatus"];
     const setAllStatus = (text, tone = "") => STATUS_IDS.forEach((id) => setStatus(id, text, tone));
 
+    async function checkDashboardRoomAvailability() {
+      const dateInput = $("dashAvailDate");
+      if (dateInput && !dateInput.value) {
+        dateInput.value = new Date().toISOString().split("T")[0];
+      }
+      const dateVal = dateInput ? dateInput.value : "";
+      const startTime = $("dashAvailStart")?.value?.trim() || "8:00 AM";
+      const endTime = $("dashAvailEnd")?.value?.trim() || "10:00 AM";
+      const statusEl = $("dashAvailStatus");
+      const resultsEl = $("dashAvailResults");
+
+      statusEl.textContent = "Checking availability...";
+      statusEl.className = "status";
+
+      try {
+        const data = await fetchJson("/api/rooms/availability", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: dateVal || undefined,
+            start_time: startTime || undefined,
+            end_time: endTime || undefined,
+          }),
+        });
+
+        if (!data.valid) {
+          statusEl.textContent = "⚠️ Invalid timeslot: " + (data.message || "Operating hours are 8:00 AM to 7:00 PM.");
+          statusEl.className = "status bad";
+          resultsEl.style.display = "none";
+          return;
+        }
+
+        const dateLabel = data.date ? `${data.date} (${data.day})` : data.day;
+        statusEl.textContent = `✅ ${dateLabel} ${data.time_range_display} — ${data.summary.available_classrooms_count} Classrooms & ${data.summary.available_labs_count} Labs Available`;
+        statusEl.className = "status ok";
+        resultsEl.style.display = "block";
+
+        const freeClassroomsHtml = data.available_classrooms.map((r) =>
+          `<span class="tag" style="background:#dcfce7; color:#15803d; margin:3px; padding:5px 10px; font-weight:600;">🏛️ ${esc(r.code)} &mdash; ${esc(r.name)} (${r.capacity} cap)</span>`
+        ).join("") || `<span class="muted">No classrooms available</span>`;
+
+        const freeLabsHtml = data.available_labs.map((r) =>
+          `<span class="tag" style="background:#ccfbf1; color:#0f766e; margin:3px; padding:5px 10px; font-weight:600;">🔬 ${esc(r.code)} &mdash; ${esc(r.name)} (${r.capacity} cap)</span>`
+        ).join("") || `<span class="muted">No labs available</span>`;
+
+        resultsEl.innerHTML = `
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+            <div style="background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px;">
+              <h3 style="margin:0 0 10px; font-size:14px; color:#15803d;">Available Classrooms (${data.summary.available_classrooms_count})</h3>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">${freeClassroomsHtml}</div>
+            </div>
+            <div style="background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px;">
+              <h3 style="margin:0 0 10px; font-size:14px; color:#0f766e;">Available Labs (${data.summary.available_labs_count})</h3>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">${freeLabsHtml}</div>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        statusEl.textContent = "⚠️ " + (err.message || String(err));
+        statusEl.className = "status bad";
+      }
+    }
+
+    $("dashCheckAvailBtn").addEventListener("click", checkDashboardRoomAvailability);
+    $("dashAvailDate").addEventListener("change", checkDashboardRoomAvailability);
+    ["dashAvailStart", "dashAvailEnd"].forEach((id) => {
+      $(id).addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          checkDashboardRoomAvailability();
+        }
+      });
+    });
+
     $("refreshAllBtn").addEventListener("click", async () => {
       try {
         setAllStatus("Refreshing...");
@@ -903,7 +1007,9 @@
       }
     });
 
-    loadAll().catch((error) => setAllStatus(error.message || String(error), "bad"));
+    loadAll().then(() => {
+      checkDashboardRoomAvailability();
+    }).catch((error) => setAllStatus(error.message || String(error), "bad"));
   </script>
 </body>
 </html>

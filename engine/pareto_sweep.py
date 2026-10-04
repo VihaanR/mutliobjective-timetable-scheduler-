@@ -32,9 +32,9 @@ DEFAULT_TIME_LIMIT_S = 240
 DEFAULT_SWEEP_POINTS = 5
 
 DEFAULT_PAIRS: list[tuple[str, str]] = [
-    ("students", "faculty"),  # 1st: Min faculty, bound student (student bound constraint)
-    ("faculty", "students"),  # 2nd: Min student, bound faculty (faculty bound constraint)
-    ("labs", "students"),     # 3rd: Min student, bound resource/labs (room balance)
+    ("students", "faculty"),   # 1st: Min faculty, bound student (student bound constraint)
+    ("faculty", "students"),   # 2nd: Min student, bound faculty (faculty bound constraint)
+    ("resource", "students"),  # 3rd: Min student, bound resource (lab + classroom)
 ]
 
 
@@ -182,9 +182,11 @@ def compute_3d_scores(vals: dict[str, int | None]) -> tuple[int | None, int | No
     """Derive (faculty_score, student_score, resource_score, total_penalty) from category dictionary."""
     fac = vals.get("faculty")
     stu = vals.get("students")
-    labs = vals.get("labs") or 0
-    rooms = vals.get("rooms") or 0
-    res = (labs + rooms) if (labs is not None and rooms is not None) else None
+    res = vals.get("resource")
+    if res is None:
+        labs = vals.get("labs") or 0
+        rooms = vals.get("rooms") or 0
+        res = (labs + rooms) if (labs is not None and rooms is not None) else None
     tot = (fac + stu + res) if (fac is not None and stu is not None and res is not None) else None
     return fac, stu, res, tot
 

@@ -1,5 +1,4 @@
-Phase: Implementation
-- [ ] Integrate empty-classroom feature (rooms.py, API, tests)
-- [ ] Restructure CP-SAT model for mid-day break (model.py)
+- [x] Integrate empty-classroom feature (rooms.py, API, tests)
+- [/] Restructure CP-SAT model for mid-day break (model.py)
 - [ ] Remove Pareto/Epsilon logic (engine/pareto_sweep.py)
 - [ ] Implement optional LLM constraint system with Gemini API key

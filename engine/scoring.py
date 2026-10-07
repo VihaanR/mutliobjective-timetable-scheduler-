@@ -270,11 +270,12 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         if hrs > allowed_cap:
             hard_add("faculty_weekly_load_exceeded")
 
+    unrelaxed_days_count = len([d for d in range(problem.days_per_week) if d not in problem.relaxed_days])
+    for division in problem.divisions:
         div_courses = [courses_by_code[c] for c in division.course_codes if c in courses_by_code]
         total_prac_skill = sum(c.practical_sessions_per_week for c in div_courses) + sum(
             c.theory_sessions_per_week for c in div_courses if c.category == CourseCategory.SKILL
         )
-        unrelaxed_days_count = len([d for d in range(problem.days_per_week) if d not in problem.relaxed_days])
         has_enough_practicals = total_prac_skill >= unrelaxed_days_count
         for day in range(problem.days_per_week):
             # a disrupted day (rain/holiday) is exempt from the day-shaped hard rules: with part

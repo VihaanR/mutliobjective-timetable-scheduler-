@@ -73,7 +73,7 @@ def test_pinned_slots_fix_session_via_fixed_time_slot_id(reference_problem):
 # In isolation 60s alone reliably reached hard=0, but inside the full test_disruption.py run (CPU
 # contention from the earlier CP-SAT baseline fixture and other tests in the same session) 60s
 # proved marginal and flaked to hard=0 in isolation vs hard=28 in-suite -- CP-SAT's parallel search
-# is not wall-clock-deterministic near the solving frontier. 120s gave comfortable, repeatable
+# is not wall-clock-deterministic near the solver feasibility boundary. 120s gave comfortable, repeatable
 # margin (hard=0 both standalone and inside the full test_disruption.py run) -- see design.md §17.
 
 @pytest.fixture(scope="module")

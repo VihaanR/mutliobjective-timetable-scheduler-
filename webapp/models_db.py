@@ -259,23 +259,6 @@ class TimetableRun(SQLModel, table=True):
     error: Optional[str] = None
 
 
-# --------------------------------------------------------------------------- pareto_run
-# Job record for the generic epsilon-constraint Pareto sweep (engine/pareto_sweep.py), mirroring
-# TimetableRun's queued -> running -> done/failed shape. Kept as its own table (not reusing
-# TimetableRun) because a sweep result is a list of frontier points per objective pair, not a
-# single timetable solution.
-class ParetoRun(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    label: str = ""
-    branch_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
-    time_limit_s: float = 30.0
-    sweep_points: int = 5
-    status: str = "queued"
-    created_at: datetime = Field(default_factory=utc_now)
-    points: Optional[dict] = Field(default=None, sa_column=Column(JSON))  # {pair_label: [point, ...]}
-    error: Optional[str] = None
-
-
 # --------------------------------------------------------------------------- term (P3)
 # Dates are stored as ISO-8601 strings ("YYYY-MM-DD"), matching SlotTemplate's start/end
 # convention above (plain strings, not SQLAlchemy Date columns) - keeps the schema portable and

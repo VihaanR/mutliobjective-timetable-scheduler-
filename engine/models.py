@@ -141,6 +141,7 @@ class SessionRequirement:
     batch_group_id: str | None = None      # sessions sharing this id must get same slot, different room
     sync_group_id: str | None = None       # sessions sharing this id must get the same slot (e.g. cross-division OE)
     is_break: bool = False                 # if True, must land in the mid-day band (not first two / last)
+    is_absent: bool = False                # if True, session is absent/cancelled
     fixed_day: int | None = None           # if set, session must be scheduled on exactly this day
                                             # (used to pin each division's daily break to its own day)
     fixed_time_slot_id: int | None = None  # if set, solver must use exactly this slot (protected blocks)

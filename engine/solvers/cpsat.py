@@ -10,9 +10,7 @@ CP-SAT's quality edge in the team's own benchmark (best soft-cost, longest runti
 
 The objective is built as four named categories (`rooms`, `labs`, `students`, `faculty`) instead
 of one flat sum. `solve()` still minimizes their combined total (unchanged end-to-end behavior for
-every existing caller), but `solve_pareto_point()` exposes the categories individually so a
-research-track epsilon-constraint sweep (design.md Sec 15.3) can bound some of them and optimize
-another, reusing this exact model -- see `research/pareto_sweep.py`.
+every existing caller).
 """
 from __future__ import annotations
 
@@ -112,7 +110,7 @@ def _add_mrv_decision_strategy(model, requirements, candidates, x, *, dynamic: b
     )
     return len(vars_in_order)
 
-# The objective categories a Pareto sweep can bound/optimize independently.
+# Objective categories retained for solver scoring and reporting.
 OBJECTIVE_CATEGORIES = ("rooms", "labs", "students", "faculty", "resource")
 
 # solve()'s default combined objective -- deliberately excludes "faculty". Unlike the other three
@@ -121,7 +119,7 @@ OBJECTIVE_CATEGORIES = ("rooms", "labs", "students", "faculty", "resource")
 # borderline-budget test, tests/test_breaks.py::test_cpsat_breaks_vary_across_days at 25s, started
 # timing out with zero assignments once it was included). solve()'s default stays byte-identical
 # to pre-Sec-15.3 behavior for every existing caller (pipeline, benchmarks, webapp); "faculty" is
-# available only via solve_pareto_point(), which the research-track sweep budgets time for.
+# kept separate from the default objective to preserve its established solve-time behavior.
 DEFAULT_SOLVE_CATEGORIES = ("rooms", "labs", "students")
 
 
@@ -519,8 +517,9 @@ class CPSATSolver(SolverBase):
     name = "cpsat"
 
     def solve(self, problem: ProblemInstance, time_limit_s: float = 300,
-              warm_start: Solution | None = None,
-              extra_solver_params: dict | None = None) -> Solution:
+               warm_start: Solution | None = None,
+               extra_solver_params: dict | None = None,
+               absent_classes: dict[str, list[str]] | None = None) -> Solution:
         start_time = time.time()
         built = _build_model(problem)
         all_terms = [t for cat in DEFAULT_SOLVE_CATEGORIES for t in built.objective_categories[cat]]
@@ -530,54 +529,6 @@ class CPSATSolver(SolverBase):
             built, problem, time_limit_s, warm_start, extra_solver_params, start_time)
         return solution
 
-    def solve_pareto_point(self, problem: ProblemInstance, bounds: dict[str, int], minimize: str,
-                            time_limit_s: float = 300, warm_start: Solution | None = None,
-                            extra_solver_params: dict | None = None,
-                            ) -> tuple[Solution, dict[str, int | None]]:
-        """Epsilon-constraint (AUGMECON2-style) point on the Pareto frontier: bound each category
-        in `bounds` at `<= epsilon`, then optimize `minimize` -- augmented with the bound
-        constraints' slack so the result is a strictly (not merely weakly) Pareto-optimal point,
-        per Mavrotas & Florios (2013). Reuses the exact same model `solve()` builds; see
-        research/pareto_sweep.py for the sweep driver. Categories: "rooms", "labs", "students",
-        "faculty" (`OBJECTIVE_CATEGORIES`).
-
-        Unlike `solve()`, returns `(Solution, category_values)` -- the achieved integer value of
-        every category's expression at the returned solution (`None` for all categories if no
-        feasible solution was found), since a sweep needs to know exactly what each objective
-        landed on, not just the aggregate `Solution.objective_value`."""
-        start_time = time.time()
-        built = _build_model(problem)
-        model = built.model
-        categories = built.objective_categories
-
-        if minimize not in categories:
-            raise ValueError(f"unknown objective category {minimize!r}; expected one of {OBJECTIVE_CATEGORIES}")
-        for category in bounds:
-            if category not in categories:
-                raise ValueError(f"unknown objective category {category!r}; expected one of {OBJECTIVE_CATEGORIES}")
-
-        slack_terms = []
-        for category, epsilon in bounds.items():
-            epsilon = int(epsilon)
-            terms = categories[category]
-            expr = sum(terms) if terms else 0
-            slack = model.NewIntVar(0, max(epsilon, 0), f"slack_{category}")
-            model.Add(expr + slack == epsilon)
-            slack_terms.append(slack)
-
-        minimize_terms = categories[minimize]
-        minimize_expr = sum(minimize_terms) if minimize_terms else 0
-        if slack_terms:
-            # scale the primary objective well above the largest possible slack sum so the
-            # augmentation term only breaks ties among equally-good `minimize` values (pushes
-            # bounded objectives to their true optimum within their bound) rather than ever
-            # overriding it -- the AUGMECON2 mechanism that avoids weakly-dominated frontier points.
-            scale = sum(int(e) for e in bounds.values()) + 1
-            model.Minimize(scale * minimize_expr - sum(slack_terms))
-        else:
-            model.Minimize(minimize_expr)
-
-        return _solve_and_decode(built, problem, time_limit_s, warm_start, extra_solver_params, start_time)
 
 
 class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
@@ -702,136 +653,3 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
         status=status_name,
     )
     return solution, category_values
-
-
-# Wide enough for any category value on DJSCE-sized instances; presolve tightens it from the
-# defining equality, so the width costs nothing.
-_PARETO_BIG = 10 ** 9
-# Cap on the hint-completion solve in ParetoSession (measured: 0.3 s on the reference instance).
-_HINT_COMPLETION_S = 5.0
-
-
-class ParetoSession:
-    """One CP-SAT model per (bound_category, minimize_category) pair, reused for every solve of
-    an AUGMECON2 sweep -- the payoff table and every epsilon point. `_build_model()` runs exactly
-    once, in the constructor.
-
-    Between solves only variable *domains* (written straight into the proto), the objective and
-    the solution hint change; no constraint is ever added after construction, so nothing
-    accumulates. The model carries:
-
-    - `bound_val == sum(bound terms)` and `min_val == sum(minimize terms)` -- fixing either
-      category for the lexicographic payoff table is a domain change on these;
-    - `bound_val + slack == eps` -- the epsilon constraint. `eps` is pinned to epsilon for a
-      bounded solve and widened to `_PARETO_BIG` (bound effectively off) for payoff solves.
-
-    CP-SAT still presolves from scratch on every `Solve()` -- the Python API has no incremental
-    mode. What is saved is the Python-side rebuild; reusing presolve would need the C++ fork
-    (guide §4.4). Decoding goes through the shared `_solve_and_decode()`."""
-
-    def __init__(self, problem: ProblemInstance, bound_category: str, minimize_category: str) -> None:
-        for category in (bound_category, minimize_category):
-            if category not in OBJECTIVE_CATEGORIES:
-                raise ValueError(f"unknown objective category {category!r}; expected one of {OBJECTIVE_CATEGORIES}")
-        self._problem = problem
-        self._bound_category = bound_category
-        self._minimize_category = minimize_category
-        self._built = _build_model(problem)
-        model = self._built.model
-        categories = self._built.objective_categories
-
-        self._vals: dict[str, cp_model.IntVar] = {}
-        for category in (bound_category, minimize_category):
-            terms = categories[category]
-            var = model.NewIntVar(-_PARETO_BIG, _PARETO_BIG, f"pareto_{category}")
-            model.Add(var == (sum(terms) if terms else 0))
-            self._vals[category] = var
-        self._eps = model.NewIntVar(-_PARETO_BIG, 2 * _PARETO_BIG, "pareto_eps")
-        self._slack = model.NewIntVar(0, 3 * _PARETO_BIG, "pareto_slack")
-        model.Add(self._vals[bound_category] + self._slack == self._eps)
-
-    def _set_domain(self, var: cp_model.IntVar, lo: int, hi: int) -> None:
-        domain = self._built.model.Proto().variables[var.Index()].domain
-        if hasattr(domain, "clear"):
-            domain.clear()
-        else:
-            del domain[:]
-        domain.extend([int(lo), int(hi)])
-
-    def _reset(self) -> None:
-        """Every solve starts from the same unconstrained state: no fixed category, bound off."""
-        for var in self._vals.values():
-            self._set_domain(var, -_PARETO_BIG, _PARETO_BIG)
-        self._set_domain(self._eps, 2 * _PARETO_BIG, 2 * _PARETO_BIG)
-        self._set_domain(self._slack, 0, 3 * _PARETO_BIG)
-        self._built.model.ClearObjective()
-        # _solve_and_decode appends hints; a variable hinted twice is MODEL_INVALID.
-        self._built.model.clear_hints()
-
-    def _complete_hint(self, hint: Solution, time_limit_s: float) -> bool:
-        """Turn `hint` (placement variables only) into a hint over every model variable.
-
-        A partial hint is only a branching preference to CP-SAT, not an incumbent: on the
-        reference instance a solve bounded at the frontier's edge, hinted with a solution that
-        satisfied the bound, still timed out with nothing in 30 s. Fixing the hinted placements
-        and solving for the rest takes 0.3 s there, and with that complete hint the same solve
-        came back OPTIMAL. Returns False, leaving no hint on the model, when the hint does not
-        satisfy the current bound/fix -- the caller then falls back to the partial hint."""
-        model, x = self._built.model, self._built.x
-        model.clear_hints()
-        assigned = hint.assignment_by_session()
-        for req in self._built.requirements:
-            a = assigned.get(req.id)
-            if a is not None and (req.id, a.time_slot_id, a.room_id) in x:
-                model.AddHint(x[(req.id, a.time_slot_id, a.room_id)], 1)
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = time_limit_s
-        solver.parameters.num_search_workers = 8
-        status = solver.Solve(model)
-        model.clear_hints()
-        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return False
-        values = list(solver.response_proto.solution)
-        model.Proto().solution_hint.vars.extend(range(len(values)))
-        model.Proto().solution_hint.values.extend(values)
-        return True
-
-    def _run(self, time_limit_s: float, hint: Solution | None, solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
-        start = time.time()
-        if hint is not None and self._complete_hint(hint, min(_HINT_COMPLETION_S, time_limit_s)):
-            hint = None  # the complete hint is on the model; don't let the partial one be added too
-        remaining = max(time_limit_s - (time.time() - start), 1.0)
-        sol, vals = _solve_and_decode(self._built, self._problem, remaining, hint, None, start, solution_callback=solution_callback)
-        return sol, vals, sol.status
-
-    def solve(self, epsilon: int, time_limit_s: float,
-              hint: Solution | None = None,
-              solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
-        """AUGMECON2 point: `bound <= epsilon`, minimize `minimize`, slack-augmented so the result
-        is strictly (not weakly) Pareto-optimal -- same objective as `solve_pareto_point()`.
-        Returns `(Solution, category_values, status_name)`."""
-        epsilon = int(epsilon)
-        self._reset()
-        self._set_domain(self._eps, epsilon, epsilon)
-        # same slack range and scale as solve_pareto_point(): scale exceeds the largest slack, so
-        # the augmentation term only breaks ties among equally-good `minimize` values.
-        self._set_domain(self._slack, 0, max(epsilon, 0))
-        scale = max(epsilon, 0) + 1
-        self._built.model.Minimize(scale * self._vals[self._minimize_category] - self._slack)
-        return self._run(time_limit_s, hint, solution_callback=solution_callback)
-
-    def solve_unbounded(self, minimize: str, fix: dict[str, int] | None = None,
-                        time_limit_s: float = 30,
-                        hint: Solution | None = None,
-                        solution_callback=None) -> tuple[Solution, dict[str, int | None], str]:
-        """Payoff-table solve: epsilon bound off, minimize `minimize`, with each category in `fix`
-        pinned to its value (the lexicographic second stage). Only this session's two categories
-        may be minimized or fixed."""
-        for category in [minimize, *(fix or {})]:
-            if category not in self._vals:
-                raise ValueError(f"category {category!r} is not part of this session's pair {tuple(self._vals)}")
-        self._reset()
-        for category, value in (fix or {}).items():
-            self._set_domain(self._vals[category], value, value)
-        self._built.model.Minimize(self._vals[minimize])
-        return self._run(time_limit_s, hint, solution_callback=solution_callback)

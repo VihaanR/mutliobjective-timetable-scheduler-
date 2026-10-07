@@ -1,6 +1,6 @@
 """FastAPI app: the bespoke SY-reference CP-SAT pipeline (startup solve + read-only endpoints,
 unchanged from before this merge) alongside the ported DB-backed dashboard platform (auth,
-entity CRUD, generic Greedy/MIP/GA/CP-SAT solves, calendar, Pareto sweep, timetable-image OCR)
+entity CRUD, generic Greedy/MIP/GA/CP-SAT solves, calendar, and timetable-image OCR)
 that can handle any branch/division/year, not just the one hardcoded SY dataset.
 
 Run:  python -m uvicorn webapp.server:app --port 8750
@@ -24,7 +24,7 @@ from webapp.db import init_db, get_engine
 from webapp.jobs import sweep_stale_running
 from webapp.routers import (
     auth as auth_router, branches, faculty, courses, rooms, allocations, slots, runs, calendar,
-    students, pareto,
+    students, constraints,
 )
 from webapp.models_db import Branch
 from webapp import seed
@@ -44,7 +44,7 @@ app = FastAPI(title="Timetable Scheduler", lifespan=lifespan)
 
 for _router in (auth_router.router, branches.router, faculty.router, students.router, courses.router,
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,
-                calendar.router, pareto.router):
+                calendar.router, constraints.router):
     app.include_router(_router)
 
 

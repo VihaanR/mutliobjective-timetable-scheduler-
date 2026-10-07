@@ -16,7 +16,7 @@ The complete change is **9 files, 245 insertions, 2 modified lines, 0 deletions*
 [`third_party/or-tools-fork/timetabling.patch`](third_party/or-tools-fork/timetabling.patch).
 
 - **[CHANGES_DONE.md](CHANGES_DONE.md)** — the full technical write-up: every code change with
-  rationale, why parameters cannot express these features, epsilon-constraint Pareto implementation
+  rationale, why parameters cannot express these features
   details, and the measured results.
 
 ---
@@ -124,7 +124,7 @@ the fork at import and enables both features automatically.
 ├── requirements.txt  pytest.ini
 │
 ├── data.py  model.py  solver.py            SY-reference pipeline: the original
-├── extract_schedule.py  main.py  pareto.py   bespoke DataBundle/CP-SAT model
+├── extract_schedule.py  main.py              bespoke DataBundle/CP-SAT model
 │
 ├── engine/                 Generic multi-solver engine (Greedy, MIP, GA, CP-SAT),
 │   └── solvers/cpsat.py      any branch/division/year. Fork integration lives here.

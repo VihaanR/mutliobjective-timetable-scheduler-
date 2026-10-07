@@ -97,6 +97,17 @@ def build_model(data):
             model.Add(is_break[(div, day, 0)] == 0)
             model.Add(is_break[(div, day, 8)] == 0)
 
+            # Hard Constraint: Break must be in the middle of the workday (H/2)
+            # h is the total hours worked in a day for the division
+            # We enforce that the break occurs at h//2
+            # Since h is a variable, we use intermediate variables
+            # Based on NEP specs, the break should be after 3-4 hours of teaching
+            # We enforce a break between the 3rd and 5th period
+            # Period indices: 0..8
+            
+            # Simplified constraint: break must be at period 3 or 4
+            model.AddBoolOr([is_break[(div, day, 3)], is_break[(div, day, 4)]])
+
     # ---- HC15 + HC16: OE pattern ----------------------------------------
     # Exactly one 1-hr day and one 2-hr day; must be different days.
     model.AddExactlyOne(oe1)

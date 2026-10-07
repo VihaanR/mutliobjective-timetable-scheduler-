@@ -19,5 +19,5 @@ anthropic>=0.40          # optional: Claude-vision extraction; features hide wit
 pytest>=8.0
 httpx>=0.27              # required by fastapi.testclient for API endpoint tests
 
-# --- research (pareto sweep plotting only) ---
+# --- research plotting only ---
 matplotlib>=3.8

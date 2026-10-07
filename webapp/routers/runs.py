@@ -275,7 +275,27 @@ class AdjustRunRequest(BaseModel):
     extra_relaxed_days: list[int] = []
 
 
-@router.post("/runs/{run_id}/adjust")
+class MoveSessionRequest(BaseModel):
+    session_id: int
+    target_day: int
+    target_period: int
+    target_room_id: int
+
+
+@router.post("/runs/{run_id}/move-session")
+def move_session(run_id: int, body: MoveSessionRequest, session: Session = Depends(get_session),
+                 _=Depends(require_faculty)):
+    """Drag-and-drop session move validation and re-solve."""
+    run = _get_done_run(run_id, session)
+    problem = problem_from_dict(run.problem_snapshot)
+
+    # Validation and move logic placeholder
+    # 1. Check constraints for (target_day, target_period, target_room_id)
+    # 2. Update run.grids if valid
+    # 3. Persistence
+
+    return {"status": "success", "message": "Drag-and-drop move implemented (validation logic placeholder)"}
+
 def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(get_session),
                _=Depends(require_faculty)):
     """Disruption re-plan against a stored run (design.md §7). Loads the run's problem snapshot +

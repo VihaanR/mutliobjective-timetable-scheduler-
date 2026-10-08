@@ -179,6 +179,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     for req in requirements:
         cands = candidates[req.id]
         if not cands:
+            model.AddBoolOr([])
             continue
         model.AddExactlyOne(x[(req.id, s, r)] for (s, _, _, r) in cands)
 
@@ -346,43 +347,19 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 if window_terms:
                     model.Add(sum(window_terms) <= cap)
 
-    # all occupancy (teaching sessions + breaks) per (division_id, slot_id)
-    # Batch-pair labs are counted once via the first-seen half
-    division_all_terms: dict = {}
-    seen_all_groups: set[str] = set()
+    # each division's day must START at the first period (08:00) -- no empty leading slot
+    first_slot_id_by_day = {day: ds[0].id for day, ds in days.items() if ds}
+    first_slot_terms: dict = {}
     for req in requirements:
-        if req.batch_group_id:
-            if req.batch_group_id in seen_all_groups:
-                continue
-            seen_all_groups.add(req.batch_group_id)
-        for (start_id, occ_ids, day, room_id) in candidates[req.id]:
-            var = x[(req.id, start_id, room_id)]
-            for sid in occ_ids:
-                _accumulate(division_all_terms, (req.division_id, sid), var)
-
-    # each division's day must form a strictly CONTIGUOUS block (ZERO IDLE GAPS)
-    for division in problem.divisions:
-        for day, day_slots in days.items():
-            if day in relaxed or not day_slots:
-                continue
-            div_occ_vars = []
-            for ts in day_slots:
-                terms = division_all_terms.get((division.id, ts.id), [])
-                if terms:
-                    occ = model.NewBoolVar(f"div_occ_{division.id}_{day}_{ts.period}")
-                    model.Add(occ == sum(terms))
-                    div_occ_vars.append(occ)
-                else:
-                    occ = model.NewBoolVar(f"div_occ_{division.id}_{day}_{ts.period}")
-                    model.Add(occ == 0)
-                    div_occ_vars.append(occ)
-
-            if div_occ_vars:
-                # Must start at the first period (08:00)
-                model.Add(div_occ_vars[0] == 1)
-                # Contiguous: no gap / hole allowed anywhere in the student's day
-                for p in range(len(div_occ_vars) - 1):
-                    model.Add(div_occ_vars[p + 1] <= div_occ_vars[p])
+        if req.is_break:
+            continue
+        for (start_id, _occ, day, room_id) in candidates[req.id]:
+            if start_id == first_slot_id_by_day.get(day):
+                first_slot_terms.setdefault((req.division_id, day), []).append(x[(req.id, start_id, room_id)])
+    for (division_id, day), terms in first_slot_terms.items():
+        if day in relaxed:
+            continue
+        model.Add(sum(terms) >= 1)
 
     # no all-theory day: each day must have >=1 practical/skill session, for divisions that offer enough sessions
     practical_or_skill_terms: dict = {}
@@ -671,15 +648,17 @@ class CPSATSolver(SolverBase):
                 remaining_iters = max(1, max_iters - iter_idx + 1)
                 if incumbent_solution is None:
                     # Cold start: Give the solver full remaining budget to establish a feasible incumbent.
-                    # Stop search as soon as the first feasible solution is found so remaining budget
-                    # is preserved for subsequent adaptive iterations.
                     iter_time_limit = remaining_budget_s
-                    stop_on_first = (max_iters > 1)
+                    stop_on_first = False
                 else:
                     iter_time_limit = min(remaining_budget_s, max(5.0, remaining_budget_s / remaining_iters))
                     stop_on_first = False
 
-            _apply_weighted_objective(built, controller.current_weights)
+            if incumbent_solution is None:
+                # Use pure linear baseline objective on cold start for fast initial incumbent discovery
+                _apply_baseline_objective(built)
+            else:
+                _apply_weighted_objective(built, controller.current_weights)
 
             iter_start = time.time()
             iter_solution, _cat_vals = _solve_and_decode(

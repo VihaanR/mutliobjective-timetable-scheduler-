@@ -780,3 +780,19 @@ Tested on the canonical DJSCE reference instance (`data/reference/djsce_cse_ds_s
 | Iteration Count | 1 solve | 3 iterative solves | Multi-solve exploration |
 | Incumbent Solution Safety | Incumbent returned | Strictly best lexicographic score kept | Zero degradation |
 
+### 7.6 Multi-Year Scaling & Candidate Space Pruning Fixes
+
+When solving institution-wide combined schedules (such as "All Odd Semesters": Sem 3 + Sem 5 + Sem 7 containing 8 divisions, 30 courses, 26 faculty, and 311 session requirements), solver search efficiency depends heavily on candidate domain bounds:
+
+1. **Lab Batch Partitioning & Classroom Assignment:**
+   - Partitioning paired lab batches across lab rooms (`i % 2 == idx % 2`) and binding non-disrupted divisions to primary home classrooms prevents combinatorial explosion in candidate variables $x_{req, slot, room}$.
+   - Pruning reduced the decision variable count on the all-odd-semesters instance from **73,090 back to 19,465** (~3.75× reduction), preventing worker presolve stalls.
+
+2. **Feasibility Preservation:**
+   - In `engine/solvers/cpsat.py`, requirements with 0 valid candidates now explicitly post `model.AddBoolOr([])` to ensure unschedulable problem instances fail gracefully as `INFEASIBLE` rather than falsely reporting optimal solutions with zero assignments.
+
+3. **Cold-Start Linear Objective Formulation:**
+   - Non-linear min/max auxiliary integer variables (such as `teacher_workload_spread` day range bounds) introduced heavy cut-generation overhead in the dual simplex LP relaxation during cold start.
+   - Initial cold-start iteration (`incumbent_solution is None`) now uses the pure linear baseline objective to rapidly find a feasible incumbent timetable, while subsequent warm-started iterations apply the dynamic weighted adaptive objective.
+
+

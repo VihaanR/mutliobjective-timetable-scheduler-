@@ -49,6 +49,11 @@ def room_options_for(req: SessionRequirement, problem: ProblemInstance,
     if req.room_type == "none":
         return [NO_ROOM]
     if req.room_type == "lab":
+        if req.batch_group_id:
+            members = groups.get(req.batch_group_id, [req])
+            idx = members.index(req) if req in members else 0
+            partitioned = [rid for i, rid in enumerate(labs) if i % 2 == idx % 2]
+            return partitioned or list(labs)
         return list(labs)
     if req.room_type == "classroom" or req.room_type not in ("none", "lab"):
         if classrooms and req.division_id:
@@ -56,7 +61,7 @@ def room_options_for(req: SessionRequirement, problem: ProblemInstance,
             if req.division_id in div_ids:
                 idx = div_ids.index(req.division_id)
                 primary = classrooms[idx % len(classrooms)]
-                if len(div_ids) <= len(classrooms) and not problem.blocked_room_slots:
+                if not problem.blocked_room_slots:
                     return [primary]
                 return [primary] + [c for c in classrooms if c != primary]
         return list(classrooms)

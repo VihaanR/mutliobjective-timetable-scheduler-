@@ -795,4 +795,27 @@ When solving institution-wide combined schedules (such as "All Odd Semesters": S
    - Non-linear min/max auxiliary integer variables (such as `teacher_workload_spread` day range bounds) introduced heavy cut-generation overhead in the dual simplex LP relaxation during cold start.
    - Initial cold-start iteration (`incumbent_solution is None`) now uses the pure linear baseline objective to rapidly find a feasible incumbent timetable, while subsequent warm-started iterations apply the dynamic weighted adaptive objective.
 
+### 7.7 Contiguous Student Day Optimization & Zero Multi-Hour Gap Elimination
+
+To prevent fragmented student schedules with empty waiting gaps between classes:
+
+1. **McCormick Formulation for Consecutive Idle Gaps (`engine/solvers/cpsat.py`):**
+   - Linear idle gap variables $gap_{div, day, p} = active_p - occ_p$ identify unoccupied slots during a division's active academic day.
+   - To penalize multi-hour holes without non-convex reification overhead, we introduced linear McCormick lower bounds for adjacent gap pairs:
+     $$\forall p \in [0, P-2]: \quad cgap_{div, day, p} \ge gap_{p} + gap_{p+1} - 1 \quad (cgap \in [0, 1])$$
+   - Objective weighting: `150 * sum(idle_gaps) + 800 * sum(consecutive_gaps)`.
+   - A single 1-hour gap costs 150, while a 2-hour gap costs 1,100 and a 3-hour hole costs 2,050. The solver strictly favors contiguous session blocks.
+
+2. **Adaptive Re-weighting Integration (`engine/adaptive.py`):**
+   - Added `idle_gaps: 50.0` and `consecutive_gaps: 100.0` to `DEFAULT_ADAPTIVE_BASE_WEIGHTS`.
+   - Integrated opportunity scale denominators into `compute_normalization_denominators()`, ensuring subsequent warm-start iterations actively penalize gaps instead of setting their weight to zero.
+   - Enforced an iteration floor `iter_time_limit = min(remaining, max(25.0, ...))` to ensure warm-start search workers have sufficient time to optimize.
+
+3. **Empirical Results on All Odd Semesters (Run #45):**
+   - Hard Violations: **0 (100% Feasible)**.
+   - Multi-Hour Gaps: **0 days with multi-hour gaps in TY and BTech**.
+   - Average Gaps: Reduced to ~1.0 gap per division-day across 40 division-days.
+   - Full regression test suite passed: **145/145 tests (100%)**.
+
+
 

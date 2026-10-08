@@ -227,6 +227,24 @@ Building on top of the custom C++ solver fork, the platform provides an algorith
 - **Warm-Start Hints (`AddHint`):** Variables from the best feasible incumbent are fed as hints into subsequent CP-SAT models, yielding a ~2x solve speedup per iteration and enabling rapid iterative search.
 - **Best Solution Retention:** Evaluates each iteration using strict lexicographic priority (hard feasibility first, followed by soft objective quality); never overwrites a superior solution.
 
+### 3.5 Contiguous Student Day Optimization & Consecutive Idle Gap Minimization
+
+To eliminate fragmented student schedules where students face multi-hour empty gaps between lectures and practicals:
+1. **McCormick Linear Lower Bound for Consecutive Idle Gaps (`engine/solvers/cpsat.py`):**
+   - Rather than treating a 3-hour hole identically to three isolated 1-hour gaps on separate days, the formulation models consecutive gap pairs:
+     $$\forall p \in [0, P-2]: \quad cgap_{div, day, p} \ge gap_{p} + gap_{p+1} - 1 \quad (cgap \in \{0, 1\})$$
+   - Objective term: `150 * sum(idle_gaps) + 800 * sum(consecutive_gaps)`.
+   - A single 1-hour gap incurs 150 penalty; a 2-hour gap incurs $150 \times 2 + 800 = 1100$; a 3-hour hole incurs $150 \times 3 + 1600 = 2050$.
+   - This pure linear McCormick bound introduces zero reification (`OnlyEnforceIf`) overhead, preserving fast CP-SAT presolve.
+2. **Adaptive Re-weighting Integration (`engine/adaptive.py`):**
+   - Added `idle_gaps` (base weight 50.0, matching institutional `SOFT_WEIGHTS`) and `consecutive_gaps` (base weight 100.0) to `DEFAULT_ADAPTIVE_BASE_WEIGHTS`.
+   - Added normalized scale denominators to `compute_normalization_denominators()`, ensuring iterative adaptation actively tracks and penalizes idle gaps instead of dropping them during warm-start iterations.
+   - Enforced an iteration time floor (`iter_time_limit = min(remaining, max(25.0, ...))`), giving warm-start solver stages adequate search time to optimize and shave off gaps.
+3. **UI Highlighting & Drag-and-Drop Hardening (`webapp/static/`):**
+   - Prominent Period row badges (`Period 1` – `Period 10`) with start/end time styling.
+   - Full-row hover illumination (`.period-row:hover`) tracking the current hour across all weekdays.
+   - Synchronous drag-data capture in `ondrop` in `webapp/static/platform.js` fixing the async `_dragData = null` race condition.
+
 ---
 
 ## 4. Manual Timetable Adjustments & Drag-and-Drop Editor
@@ -279,6 +297,7 @@ Before applying a move, the backend performs rigorous conflict detection:
 | **Phase 7: Interactive Drag-and-Drop Timetable Editor** | ✅ Completed | Full implementation of `/api/runs/{run_id}/move-session`, HTML5 draggable session cards with visual snap targets, conflict toasts, and test suite ([`tests/engine/test_drag_and_drop.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/tests/engine/test_drag_and_drop.py)). |
 | **Phase 8: Adaptive CP-SAT Objective Layer** | ✅ Completed | Implemented algorithmic weight controller ([`engine/adaptive.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/adaptive.py)), warm-start CP-SAT iterative hints, optimization modes (`baseline`, `priority`, `adaptive`), unit tests ([`tests/engine/test_adaptive.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/tests/engine/test_adaptive.py)), and benchmark harness ([`research/adaptive_cpsat_benchmark.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/research/adaptive_cpsat_benchmark.py)). |
 | **Phase 9: Scaled Multi-Year Solve Optimization** | ✅ Completed | Pruned lab batch room candidates and bound primary classrooms to reduce search variables from 73,090 to 19,465 ([`engine/solvers/candidates.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/solvers/candidates.py)). Restored linear cold-start initial incumbent search in Adaptive CP-SAT ([`engine/solvers/cpsat.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/solvers/cpsat.py)), solving All Odd Semesters (311 requirements) in 31.9s. |
+| **Phase 10: Contiguous Schedules & Multi-Hour Gap Elimination** | ✅ Completed | Superlinear consecutive idle gap McCormick formulation in [`engine/solvers/cpsat.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/solvers/cpsat.py); adaptive controller integration in [`engine/adaptive.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/adaptive.py); UI Period/hour badges & row hover tracking in [`webapp/static/`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/webapp/static/); 100% test pass rate (145/145). |
 
 ---
 

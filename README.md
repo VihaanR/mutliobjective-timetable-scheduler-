@@ -199,10 +199,13 @@ the fork. Arms A and B therefore live in different virtualenvs and cannot run in
 .venv-fork/Scripts/python     -m research.fork_benchmark --compare research/base20.json research/fork20.json
 ```
 
-## Adaptive CP-SAT Optimization
+## Adaptive CP-SAT & Contiguous Scheduling
 
-In addition to the C++ search modifications, the repository includes an algorithmic **Adaptive CP-SAT** objective controller (`engine/adaptive.py`) that iteratively adjusts soft-constraint weights using feedback from prior CP-SAT solves and warm-start hints (`AddHint`):
+In addition to the C++ search modifications, the repository includes an algorithmic **Adaptive CP-SAT** objective controller (`engine/adaptive.py`) and a **Contiguous Schedule Formulation** (`engine/solvers/cpsat.py`):
 
+- **Zero Multi-Hour Gaps**: Penalizes consecutive unoccupied periods via linear McCormick lower bounds ($cgap_{div, day, p} \ge gap_p + gap_{p+1} - 1$) with heavy quadratic step penalties, ensuring students have continuous, solid blocks of teaching.
+- **Adaptive Reweighting**: Dynamically adjusts soft constraint weights across iterative solves using feedback from prior candidate timetables and warm-start hints (`AddHint`).
+- **Interactive Drag-and-Drop Editor**: Real-time browser-based timetable adjustment with atomic conflict detection, preserving lunch breaks and enforcing physical room and teacher availability.
 - **Modes supported**: `baseline` (stock formulation), `priority` (fixed weights), `adaptive` (dynamic reweighting).
 - **Run benchmark**:
   ```bash

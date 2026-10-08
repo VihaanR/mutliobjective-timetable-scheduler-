@@ -378,6 +378,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 division_all_terms.setdefault((req.division_id, sid), []).append(var)
 
     idle_gaps_unscaled: list = []
+    consecutive_gap_vars: list = []
     for division in problem.divisions:
         for day, day_slots in days.items():
             if day in relaxed or not day_slots:
@@ -399,10 +400,18 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
             for p in range(P - 1):
                 model.Add(active[p] >= active[p + 1])
 
+            day_gaps = []
             for p in range(P):
                 gap_var = model.NewIntVar(0, 1, f"gap_{division.id}_{day}_{p}")
                 model.Add(gap_var == active[p] - occ[p])
+                day_gaps.append(gap_var)
                 idle_gaps_unscaled.append(gap_var)
+
+            # Heavily penalize consecutive gaps so multi-hour holes in a student's day are eliminated
+            for p in range(P - 1):
+                cgap = model.NewIntVar(0, 1, f"cgap_{division.id}_{day}_{p}")
+                model.Add(cgap >= day_gaps[p] + day_gaps[p + 1] - 1)
+                consecutive_gap_vars.append(cgap)
 
     # no all-theory day: each day must have >=1 practical/skill session, for divisions that offer enough sessions
     practical_or_skill_terms: dict = {}
@@ -530,7 +539,12 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     # Calibrated baseline categories (prioritizes compact schedule and zero idle gaps)
     room_obj_terms = room_waste_unscaled
     lab_obj_terms = [10 * v for v in lab_unscaled]
-    student_obj_terms = [5 * v for v in break_unscaled] + [20 * v for v in span_unscaled] + [100 * g for g in idle_gaps_unscaled]
+    student_obj_terms = (
+        [5 * v for v in break_unscaled]
+        + [20 * v for v in span_unscaled]
+        + [150 * g for g in idle_gaps_unscaled]
+        + [800 * cg for cg in consecutive_gap_vars]
+    )
     faculty_obj_terms = [FACULTY_BALANCE_WEIGHT * v for v in workload_unscaled]
 
     objective_categories = {
@@ -547,6 +561,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "break_not_midmorning": break_unscaled,
         "day_span": span_unscaled,
         "idle_gaps": idle_gaps_unscaled,
+        "consecutive_gaps": consecutive_gap_vars,
         "teacher_workload_spread": workload_unscaled,
     }
 
@@ -695,7 +710,7 @@ class CPSATSolver(SolverBase):
                     iter_time_limit = remaining_budget_s if max_iters <= 1 else max(30.0, remaining_budget_s / 2.0)
                     stop_on_first = False
                 else:
-                    iter_time_limit = min(remaining_budget_s, max(15.0, remaining_budget_s / remaining_iters))
+                    iter_time_limit = min(remaining_budget_s, max(25.0, remaining_budget_s / remaining_iters))
                     stop_on_first = False
 
             if incumbent_solution is None:

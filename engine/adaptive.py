@@ -30,6 +30,8 @@ DEFAULT_ADAPTIVE_BASE_WEIGHTS: dict[str, float] = {
     "lab_not_before_final_slots": 10.0, # lab_consecutive / late lab avoidance
     "break_not_midmorning": 6.0,        # student_free_period_distribution
     "day_span": 4.0,                    # avoid_last_period / compact day span
+    "idle_gaps": 50.0,                  # student gap minimization (institutional penalty 50.0)
+    "consecutive_gaps": 100.0,          # penalize multi-hour holes in student day
     "teacher_workload_spread": 8.0,     # workload_balance
 }
 
@@ -72,6 +74,10 @@ def compute_normalization_denominators(problem: ProblemInstance) -> dict[str, fl
     # Day span beyond compact span (7): at most ~2 hours excess per division per day
     span_denom = max(1.0, float(num_divs * days * 2.0))
 
+    # Idle gaps across week: at most ~2 hours per division per day
+    gaps_denom = max(1.0, float(num_divs * days * 2.0))
+    consecutive_gaps_denom = max(1.0, float(num_divs * days * 1.0))
+
     # Max workload spread per faculty across week: bounded by daily cap (6)
     workload_denom = max(1.0, float(num_faculty * 6.0))
 
@@ -80,6 +86,8 @@ def compute_normalization_denominators(problem: ProblemInstance) -> dict[str, fl
         "lab_not_before_final_slots": lab_denom,
         "break_not_midmorning": break_denom,
         "day_span": span_denom,
+        "idle_gaps": gaps_denom,
+        "consecutive_gaps": consecutive_gaps_denom,
         "teacher_workload_spread": workload_denom,
     }
 
@@ -92,7 +100,7 @@ class AdaptiveConfig:
     learning_rate: float = 0.15
     decay_factor: float = 0.95
     min_weight: float = 1.0
-    max_weight: float = 50.0
+    max_weight: float = 200.0
     stall_iterations: int = 3
     current_weight_factor: float = 1.0     # factor 'a'
     previous_weight_factor: float = 0.5    # factor 'b'

@@ -533,5 +533,34 @@ table.history-table th { color: var(--muted); font-weight: 600; text-transform: 
   line-height: 1.4;
 }
 
-
+/* -------------------------------------------------------------- drag-and-drop timetable editing */
+/* Draggable sessions show a grab cursor and subtle lift on hover */
+.session[draggable="true"] { cursor: grab; transition: box-shadow .15s, opacity .15s; }
+.session[draggable="true"]:hover {
+  box-shadow: 0 3px 10px rgba(0,0,0,.14);
+  outline: 1.5px dashed var(--accent);
+  outline-offset: 1px;
+}
+/* The session card being dragged */
+.session.dragging {
+  opacity: .45;
+  cursor: grabbing;
+  box-shadow: none;
+}
+/* Valid drop target (same room type) */
+table.tt td.drag-over {
+  background: rgba(53, 208, 165, .18) !important;
+  outline: 2px dashed var(--good) !important;
+  outline-offset: -2px;
+  border-radius: 6px;
+  transition: background .12s;
+}
+/* Invalid drop target (wrong room type — e.g. trying to drop a lab into a classroom column) */
+table.tt td.drag-over-invalid {
+  background: rgba(255, 107, 107, .15) !important;
+  outline: 2px dashed var(--bad) !important;
+  outline-offset: -2px;
+  border-radius: 6px;
+  cursor: not-allowed;
+}
 

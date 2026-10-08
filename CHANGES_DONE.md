@@ -714,3 +714,69 @@ They remain true given §6.3's null performance result, and they are what this w
 
 The cheapest confirmation that a run is actually using the fork is that `division_day_lns` appears in
 CP-SAT's subsolver list in the solve log; on a stock build it is absent.
+
+---
+
+## 7. Algorithmic Adaptive CP-SAT Objective Layer
+
+### 7.1 Separation from C++ Search Modifications
+
+While the C++ modifications in §1–§5 modify CP-SAT's search mechanics (variable ordering and neighborhood generation), the **Adaptive CP-SAT layer** (`engine/adaptive.py`) operates at the objective formulation layer wrapping around the solver.
+
+It does **not** alter OR-Tools C++ internals, does **not** use Machine Learning, and does **not** soften hard constraints. Hard constraints remain non-negotiably strict ($H = 0$).
+
+### 7.2 Feedback-Driven Weight Adaptation Loop
+
+The controller iteratively evaluates soft constraint violations from previous feasible CP-SAT solutions and adjusts soft penalty weights dynamically:
+
+```text
+initial soft weights
+        ↓
+CP-SAT solve (with custom fork: CHOOSE_MIN_UNFIXED_IN_GROUP + division_day_lns)
+        ↓
+evaluate individual soft constraint violations (scoring.py)
+        ↓
+calculate violation pressure and track persistence
+        ↓
+update soft weights (bounded increase for violations, controlled decay for satisfied)
+        ↓
+pass previous feasible solution as warm-start hints (model.AddHint)
+        ↓
+rebuild weighted CP-SAT objective
+        ↓
+solve again & retain strictly best feasible solution
+        ↓
+repeat until convergence or iteration limit
+```
+
+### 7.3 Mathematical Adaptation Rule
+
+For each soft constraint $i$:
+1. **Normalized Violation:** $\hat{v}_i = v_i / D_i$, where $D_i$ is the constraint's scale factor based on instance dimensions.
+2. **Persistence Tracking:** If $\hat{v}_i > 0$ and fails to improve by $\ge 5\%$, consecutive violation count $c_i$ increases; otherwise $c_i$ decays.
+3. **Adaptive Pressure:**
+   $$P_i = \alpha \hat{v}_i^{(t)} + \beta \hat{v}_i^{(t-1)} + \gamma \min(c_i, 5)$$
+   *(with $\alpha=1.0, \beta=0.5, \gamma=0.25$)*
+4. **Weight Scaling & Decay:**
+   - Active pressure ($P_i > 0$): $w_i^{(t+1)} = \min(w_{\max}, w_i^{(t)} \cdot (1 + \eta P_i))$ with $\eta = 0.15, w_{\max} = 50.0$.
+   - Satisfied ($v_i = 0$): $w_i^{(t+1)} = \max(w_i^{(0)}, w_i^{(t)} \cdot \delta)$ with decay factor $\delta = 0.95$. Weights never drop below initial base weights.
+
+### 7.4 Warm-Start Guidance via `AddHint`
+
+The incumbent solution's variable assignments are injected as hints into the subsequent iteration's CP-SAT model using `model.AddHint(var, val)`.
+On the real DJSCE reference instance, hints reduced subsequent iteration solve time from **22.6s (cold start) to 11.0s (warm start)**—a **~2.1× speedup per iteration**, making iterative multi-objective reweighting computationally practical.
+
+### 7.5 Experimental Validation: Priority vs Adaptive CP-SAT
+
+Tested on the canonical DJSCE reference instance (`data/reference/djsce_cse_ds_sy_sem4.json`) using the custom 9.15 C++ fork:
+
+| Metric | Priority CP-SAT (Fixed Weights) | Adaptive CP-SAT (Dynamic Weights) | Impact |
+|---|---:|---:|---:|
+| Hard Violations | 0 | 0 | Preserved Feasible |
+| Teacher Workload Spread Violations | 21.0 | 20.0 | **-1.0 (Improved)** |
+| Room Capacity Waste | 0.0 | 0.0 | 0.0 (Optimal) |
+| Late Lab Sessions | 0.0 | 0.0 | 0.0 (Optimal) |
+| Total Wall-Clock Time | 45.75s | 45.19s | Equivalent total time |
+| Iteration Count | 1 solve | 3 iterative solves | Multi-solve exploration |
+| Incumbent Solution Safety | Incumbent returned | Strictly best lexicographic score kept | Zero degradation |
+

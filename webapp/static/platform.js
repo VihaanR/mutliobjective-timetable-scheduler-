@@ -11,6 +11,7 @@ let currentRunId = null;
 let pollTimer = null;
 let originalGrids = null;          // the un-adjusted run grids, so "Restore original" can revert
 let movedIds = new Set();          // session ids relocated by the last adjustment (for highlighting)
+let dragMoveIds = new Set();       // session ids moved by drag-and-drop (for highlight badge)
 
 // Compare-solvers panel state.
 let compareResults = null;
@@ -47,6 +48,11 @@ on("genOptAllLoaded", "click", () => { closeGenScopeModal(); generate("all"); })
 on("compareBtn", "click", runCompare);
 on("adjustBtn", "click", adjust);
 on("restoreBtn", "click", restoreOriginal);
+on("solver", "change", () => {
+  const isCpsat = $("solver") && $("solver").value === "cpsat";
+  const wrap = $("optimizationModeWrap");
+  if (wrap) wrap.style.display = isCpsat ? "" : "none";
+});
 
 
 on("adjScope", "change", () => {
@@ -327,6 +333,7 @@ async function generate(mode = "selected", specificBranchId = null) {
 
   const payload = {
     solver: $("solver").value,
+    optimization_mode: $("optimizationMode") ? $("optimizationMode").value : "baseline",
     time_limit: parseFloat($("timeLimit").value) || 180,
     label,
     branch_ids,
@@ -409,6 +416,7 @@ function pollRun(runId, label) {
         currentGrids = run.grids;
         originalGrids = run.grids;
         movedIds = new Set();
+        dragMoveIds = new Set();
         activeDivision = 0;
         renderTabs();
         renderGrid();
@@ -459,6 +467,29 @@ function renderSummary(run) {
     box.innerHTML = `<b>Partial timetable.</b> ${run.hard} hard constraint violation(s) remain.`;
   } else {
     box.style.display = "none";
+  }
+
+  const adaptCard = $("adaptiveMetaCard");
+  const extra = run.solution && run.solution.extra_data;
+  if (adaptCard && extra && extra.iterations) {
+    adaptCard.style.display = "block";
+    const iterEl = $("adaptIterVal");
+    const convEl = $("adaptConvVal");
+    const scoreEl = $("adaptScoreVal");
+    const weightsEl = $("adaptWeightsVal");
+    if (iterEl) iterEl.textContent = `${extra.iterations} iteration(s)`;
+    if (convEl) convEl.textContent = extra.converged ? `Converged (${extra.converged_reason})` : "Completed max iterations";
+    if (scoreEl) {
+      const bScore = extra.best_score || {};
+      scoreEl.textContent = `${bScore.hard_violations ?? 0} hard, ${(bScore.soft_cost ?? run.soft ?? 0).toFixed(1)} soft`;
+    }
+    if (weightsEl && extra.final_weights) {
+      const wStrs = Object.entries(extra.final_weights)
+        .map(([k, v]) => `<b>${k}</b>: ${Number(v).toFixed(2)}`);
+      weightsEl.innerHTML = `<span><b>Adapted Weights:</b> ${wStrs.join(" &bull; ")}</span>`;
+    }
+  } else if (adaptCard) {
+    adaptCard.style.display = "none";
   }
 }
 
@@ -530,6 +561,54 @@ function renderTabs() {
   });
 }
 
+// ---------------------------------------------------------------- Toast notification
+function showToast(message, type = "success") {
+  let container = document.getElementById("toastContainer");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toastContainer";
+    container.style.cssText = [
+      "position:fixed", "bottom:24px", "right:24px", "z-index:99999",
+      "display:flex", "flex-direction:column", "gap:8px", "pointer-events:none",
+    ].join(";");
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement("div");
+  toast.style.cssText = [
+    "background:" + (type === "success" ? "#1e293b" : "#991b1b"),
+    "color:#fff",
+    "padding:11px 18px",
+    "border-radius:10px",
+    "font-size:13.5px",
+    "font-weight:600",
+    "box-shadow:0 4px 18px rgba(0,0,0,0.25)",
+    "pointer-events:all",
+    "opacity:0",
+    "transform:translateY(8px)",
+    "transition:opacity .25s, transform .25s",
+    "max-width:380px",
+    "border-left:4px solid " + (type === "success" ? "#35d0a5" : "#ef4444"),
+  ].join(";");
+  toast.textContent = message;
+  container.appendChild(toast);
+  // Animate in
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      toast.style.opacity = "1";
+      toast.style.transform = "translateY(0)";
+    });
+  });
+  // Remove after 3s
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(8px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 3200);
+}
+
+// ---------------------------------------------------------------- Drag-and-drop state
+let _dragData = null;  // {session_id, original_room_id, required_room_type}
+
 function buildGridTable(grids, mode, activeIdx, movedSet) {
   const items = getEntitiesForMode(grids, mode);
   if (!items || items.length === 0 || !items[activeIdx]) return null;
@@ -553,45 +632,69 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
       const key = `${dayIdx}_${p.period}`;
       const entries = (item.cells && item.cells[key]) || [];
       const td = document.createElement("td");
-      // Drag and drop target handling
+
+      // ── Drop target handling ──────────────────────────────────────────────
+      td.ondragenter = (event) => {
+        event.preventDefault();
+        if (!_dragData) return;
+        // Check compatibility: room type must match what the dragged session needs
+        const targetRoomId = (mode === "divisions") ? null : item.id;
+        const compatible = !targetRoomId || !_dragData.required_room_type ||
+          _dragData.required_room_type === "none" || !item.room_type ||
+          item.room_type === _dragData.required_room_type;
+        td.classList.add(compatible ? "drag-over" : "drag-over-invalid");
+      };
       td.ondragover = (event) => {
         event.preventDefault();
-        td.classList.add("drag-over");
       };
-      td.ondragleave = () => td.classList.remove("drag-over");
+      td.ondragleave = (e) => {
+        // Only remove if we actually left the td (not just moved to a child)
+        if (!td.contains(e.relatedTarget)) {
+          td.classList.remove("drag-over", "drag-over-invalid");
+        }
+      };
       td.ondrop = async (event) => {
         event.preventDefault();
-        td.classList.remove("drag-over");
-        const data = JSON.parse(event.dataTransfer.getData("text/plain"));
-        const targetDay = dayIdx;
-        const targetPeriod = p.period;
-        const targetRoomId = item.id; // Assuming item corresponds to room/division depending on mode
+        td.classList.remove("drag-over", "drag-over-invalid");
+        if (!_dragData || !currentRunId) return;
 
-        // Call the API endpoint
+        // Determine target_room_id: in room/lab view it's the room item's id;
+        // in division/teacher view we keep the session's original room.
+        let targetRoomId = _dragData.original_room_id;
+        if (mode === "classrooms" || mode === "labs") {
+          targetRoomId = String(item.id);
+        }
+
         try {
           const response = await fetch(`/api/runs/${currentRunId}/move-session`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              session_id: parseInt(data, 10),
-              target_day: targetDay,
-              target_period: targetPeriod,
-              target_room_id: targetRoomId
-            })
+              session_id: _dragData.session_id,
+              target_day: dayIdx,
+              target_period: p.period,
+              target_room_id: targetRoomId,
+            }),
           });
 
           if (response.ok) {
-            console.log("Move successful");
-            // Assuming currentRunId is available globally or can be retrieved
-            // Need to refresh grids - will implement based on existing render logic
-            location.reload();
+            const data = await response.json();
+            // Re-render with the updated grids returned by the server
+            currentGrids = data.grids;
+            dragMoveIds.add(_dragData.session_id);
+            renderTabs();
+            renderGrid();
+            showToast(
+              `✓ Moved session to ${g.days[dayIdx]} period ${p.period + 1}` +
+              (data.hard > 0 ? ` (${data.hard} conflict${data.hard > 1 ? "s" : ""})` : " (no conflicts)"),
+              data.hard > 0 ? "warn" : "success"
+            );
           } else {
-            const err = await response.json();
-            alert("Move failed: " + (err.detail || "Unknown error"));
+            const err = await response.json().catch(() => ({}));
+            showToast("✗ Move rejected: " + (err.detail || "Unknown error"), "error");
           }
         } catch (e) {
-          console.error("Move error", e);
-          alert("Move error: " + e.message);
+          showToast("✗ Network error: " + e.message, "error");
         }
       };
 
@@ -603,27 +706,32 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
         entries.forEach((e) => {
           const s = document.createElement("div");
           s.className = "session " + (TYPE_CLASS[e.type] || "theory") +
-            (movedSet && movedSet.has(e.session_id) ? " moved" : "");
+            ((movedSet && movedSet.has(e.session_id)) || dragMoveIds.has(e.session_id) ? " moved" : "");
           if (e.is_break) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
-            // Drag and Drop support
+            // Drag source
             s.draggable = true;
             s.dataset.sessionId = e.session_id;
-            s.dataset.originalDay = dayIdx;
-            s.dataset.originalPeriod = p.period;
-            s.dataset.originalRoomId = e.room_id;
 
             s.ondragstart = (event) => {
-              event.dataTransfer.setData("text/plain", JSON.stringify({
-                session_id: e.session_id,
-                original_day: dayIdx,
-                original_period: p.period,
-                original_room_id: e.room_id
-              }));
+              _dragData = {
+                session_id: e.session_id,          // engine string id
+                original_room_id: e.room || "",   // engine room id string
+                required_room_type: e.type === "Practical" ? "lab" : "classroom",
+              };
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", e.session_id);
               s.classList.add("dragging");
             };
-            s.ondragend = () => s.classList.remove("dragging");
+            s.ondragend = () => {
+              s.classList.remove("dragging");
+              _dragData = null;
+              // Clear any leftover drag-over styles on the whole table
+              document.querySelectorAll(".drag-over, .drag-over-invalid").forEach((el) => {
+                el.classList.remove("drag-over", "drag-over-invalid");
+              });
+            };
 
             const batch = e.batch ? ` · ${e.batch}` : "";
             const courseCode = e.course_code || e.course;
@@ -642,7 +750,7 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
             s.innerHTML =
               `<div class="s-course">${courseCode}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
               metaHtml;
-            s.title = `${courseCode} — ${e.type}\nFaculty: ${e.faculty_name || e.faculty || "—"}\nRoom: ${e.room_name || e.room || "—"}\nClass: ${e.class_label || e.division_name || e.division_id}`;
+            s.title = `${courseCode} — ${e.type}\nFaculty: ${e.faculty_name || e.faculty || "—"}\nRoom: ${e.room_name || e.room || "—"}\nClass: ${e.class_label || e.division_name || e.division_id}\n\nDrag to move`;
           }
           cell.appendChild(s);
         });
@@ -811,6 +919,7 @@ function restoreOriginal() {
   if (!originalGrids) return;
   currentGrids = originalGrids;
   movedIds = new Set();
+  dragMoveIds = new Set();
   renderTabs();
   renderGrid();
   $("adjStatus").textContent = "restored original timetable.";
@@ -854,6 +963,7 @@ async function loadSavedRun(runId, autoScroll = true) {
       currentGrids = run.grids;
       originalGrids = run.grids;
       movedIds = new Set();
+      dragMoveIds = new Set();
       activeDivision = 0;
       renderTabs();
       renderGrid();

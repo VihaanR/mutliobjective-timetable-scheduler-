@@ -1,0 +1,234 @@
+{
+  "priority": [
+    {
+      "mode": "priority",
+      "seed": 42,
+      "hard_violations": 0,
+      "soft_penalty": 99.21666666666667,
+      "solve_time_s": 45.75,
+      "objective_value": 346.0,
+      "violations": {
+        "room_capacity_waste": 0.0,
+        "lab_not_before_final_slots": 0.0,
+        "break_not_midmorning": 9.0,
+        "day_span": 9.0,
+        "teacher_workload_spread": 21.0
+      },
+      "iterations": 1,
+      "converged": false,
+      "convergence_reason": null,
+      "best_iteration": null,
+      "initial_weights": {
+        "room_capacity_waste": 5.0,
+        "lab_not_before_final_slots": 10.0,
+        "break_not_midmorning": 6.0,
+        "day_span": 4.0,
+        "teacher_workload_spread": 8.0
+      },
+      "final_weights": {
+        "room_capacity_waste": 5.0,
+        "lab_not_before_final_slots": 10.0,
+        "break_not_midmorning": 6.0,
+        "day_span": 4.0,
+        "teacher_workload_spread": 8.0
+      },
+      "history": []
+    }
+  ],
+  "adaptive": [
+    {
+      "mode": "adaptive",
+      "seed": 42,
+      "hard_violations": 0,
+      "soft_penalty": 100.38333333333333,
+      "solve_time_s": 45.19,
+      "objective_value": 352.0,
+      "violations": {
+        "room_capacity_waste": 0.0,
+        "lab_not_before_final_slots": 0.0,
+        "break_not_midmorning": 10.0,
+        "day_span": 9.0,
+        "teacher_workload_spread": 20.0
+      },
+      "iterations": 3,
+      "converged": false,
+      "convergence_reason": "",
+      "best_iteration": 1,
+      "initial_weights": {
+        "room_capacity_waste": 5.0,
+        "lab_not_before_final_slots": 10.0,
+        "break_not_midmorning": 6.0,
+        "day_span": 4.0,
+        "teacher_workload_spread": 8.0
+      },
+      "final_weights": {
+        "room_capacity_waste": 5.0,
+        "lab_not_before_final_slots": 10.0,
+        "break_not_midmorning": 8.156015625,
+        "day_span": 5.837489499999999,
+        "teacher_workload_spread": 10.8746875
+      },
+      "history": [
+        {
+          "iteration": 1,
+          "solver_status": "FEASIBLE",
+          "solve_time": 22.592,
+          "objective": 352.0,
+          "weighted_soft_cost": 100.38,
+          "hard_violations": 0,
+          "constraints": {
+            "room_capacity_waste": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 5.0,
+              "new_weight": 5.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "lab_not_before_final_slots": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 10.0,
+              "new_weight": 10.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "break_not_midmorning": {
+              "violations": 10.0,
+              "normalized": 0.1667,
+              "old_weight": 6.0,
+              "new_weight": 6.375,
+              "persistence": 1,
+              "pressure": 0.4167
+            },
+            "day_span": {
+              "violations": 9.0,
+              "normalized": 0.3,
+              "old_weight": 4.0,
+              "new_weight": 4.33,
+              "persistence": 1,
+              "pressure": 0.55
+            },
+            "teacher_workload_spread": {
+              "violations": 20.0,
+              "normalized": 0.1667,
+              "old_weight": 8.0,
+              "new_weight": 8.5,
+              "persistence": 1,
+              "pressure": 0.4167
+            }
+          },
+          "improved": true,
+          "converged": false,
+          "convergence_reason": null
+        },
+        {
+          "iteration": 2,
+          "solver_status": "FEASIBLE",
+          "solve_time": 11.154,
+          "objective": 374.71999999999997,
+          "weighted_soft_cost": 100.38,
+          "hard_violations": 0,
+          "constraints": {
+            "room_capacity_waste": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 5.0,
+              "new_weight": 5.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "lab_not_before_final_slots": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 10.0,
+              "new_weight": 10.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "break_not_midmorning": {
+              "violations": 10.0,
+              "normalized": 0.1667,
+              "old_weight": 6.375,
+              "new_weight": 7.0922,
+              "persistence": 2,
+              "pressure": 0.75
+            },
+            "day_span": {
+              "violations": 9.0,
+              "normalized": 0.3,
+              "old_weight": 4.33,
+              "new_weight": 4.947,
+              "persistence": 2,
+              "pressure": 0.95
+            },
+            "teacher_workload_spread": {
+              "violations": 20.0,
+              "normalized": 0.1667,
+              "old_weight": 8.5,
+              "new_weight": 9.4563,
+              "persistence": 2,
+              "pressure": 0.75
+            }
+          },
+          "improved": false,
+          "converged": false,
+          "convergence_reason": null
+        },
+        {
+          "iteration": 3,
+          "solver_status": "FEASIBLE",
+          "solve_time": 10.943,
+          "objective": 418.04510000000016,
+          "weighted_soft_cost": 100.38,
+          "hard_violations": 0,
+          "constraints": {
+            "room_capacity_waste": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 5.0,
+              "new_weight": 5.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "lab_not_before_final_slots": {
+              "violations": 0.0,
+              "normalized": 0.0,
+              "old_weight": 10.0,
+              "new_weight": 10.0,
+              "persistence": 0,
+              "pressure": 0.0
+            },
+            "break_not_midmorning": {
+              "violations": 10.0,
+              "normalized": 0.1667,
+              "old_weight": 7.0922,
+              "new_weight": 8.156,
+              "persistence": 3,
+              "pressure": 1.0
+            },
+            "day_span": {
+              "violations": 9.0,
+              "normalized": 0.3,
+              "old_weight": 4.947,
+              "new_weight": 5.8375,
+              "persistence": 3,
+              "pressure": 1.2
+            },
+            "teacher_workload_spread": {
+              "violations": 20.0,
+              "normalized": 0.1667,
+              "old_weight": 9.4563,
+              "new_weight": 10.8747,
+              "persistence": 3,
+              "pressure": 1.0
+            }
+          },
+          "improved": false,
+          "converged": false,
+          "convergence_reason": null
+        }
+      ]
+    }
+  ]
+}

@@ -151,7 +151,7 @@ def load_problem(path: str | Path) -> ProblemInstance:
 
 
 def solution_to_dict(solution: Solution) -> dict:
-    return {
+    d = {
         "solver_name": solution.solver_name,
         "wall_clock_seconds": solution.wall_clock_seconds,
         "objective_value": solution.objective_value,
@@ -161,6 +161,9 @@ def solution_to_dict(solution: Solution) -> dict:
             for a in solution.assignments
         ],
     }
+    if solution.extra_data is not None:
+        d["extra_data"] = solution.extra_data
+    return d
 
 
 def solution_from_dict(data: dict) -> Solution:
@@ -170,6 +173,7 @@ def solution_from_dict(data: dict) -> Solution:
         wall_clock_seconds=data["wall_clock_seconds"],
         objective_value=data.get("objective_value"),
         status=data.get("status", "UNKNOWN"),
+        extra_data=data.get("extra_data"),
     )
 
 

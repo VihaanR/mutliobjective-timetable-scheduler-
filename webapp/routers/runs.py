@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -20,6 +21,7 @@ from starlette.background import BackgroundTask
 from engine.disruption import affected_slots_for_day, replan
 from engine.export import export_pdf, export_xlsx
 from engine.io_json import problem_from_dict, problem_to_dict, solution_from_dict
+from engine.models import Assignment, Solution
 from engine.pipeline import PipelineConfig, run_pipeline
 from engine.scoring import score
 from engine.solvers import SOLVERS
@@ -28,7 +30,7 @@ from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.grid_meta import annotate_grids
 from webapp.jobs import has_active_run, run_generation
-from webapp.models_db import Branch, TimetableRun
+from webapp.models_db import Branch, TimetableRun, ManualEdit
 from webapp.problem_builder import build_division_meta, readiness, spans_multiple_branches
 
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -44,6 +46,7 @@ class GenerateRequest(BaseModel):
     time_limit: float = 30.0
     label: str = ""
     branch_ids: list[int] | None = None
+    optimization_mode: str = "baseline"
 
 
 class CompareRequest(BaseModel):
@@ -82,6 +85,10 @@ def generate(
         b.id for b in session.exec(select(Branch)).all()
     ]
 
+    div_meta = build_division_meta(session, body.branch_ids, qualify_ids=qualify_ids)
+    if body.optimization_mode:
+        div_meta["_optimization_mode"] = body.optimization_mode
+
     run = TimetableRun(
         status="queued",
         solver=body.solver,
@@ -89,7 +96,7 @@ def generate(
         label=body.label,
         problem_snapshot=problem_to_dict(problem),
         branch_ids=list(covered),
-        division_meta=build_division_meta(session, body.branch_ids, qualify_ids=qualify_ids),
+        division_meta=div_meta,
     )
     session.add(run)
     session.commit()
@@ -262,6 +269,7 @@ def export_run_pdf(run_id: int, session: Session = Depends(get_session), _=Depen
 
 
 class AdjustRunRequest(BaseModel):
+    constraint_query: Optional[str] = None
     day: int                          # 0=Mon .. 4=Fri — the disrupted weekday
     from_period: int | None = None    # None => whole-day holiday; N => rain from period N onward
     reason: str = ""                  # "holiday" | "rain" | free text (annotation only)
@@ -276,26 +284,228 @@ class AdjustRunRequest(BaseModel):
 
 
 class MoveSessionRequest(BaseModel):
-    session_id: int
-    target_day: int
-    target_period: int
-    target_room_id: int
+    # session_id is the engine's string id (e.g. "D1_MATH_TH_0"), carried as-is through the
+    # frontend's data-session-id attribute and sent back here. Pydantic will coerce to str.
+    session_id: str
+    target_day: int      # 0=Mon .. 4=Fri
+    target_period: int   # 0-based period index within the day
+    target_room_id: str  # engine Room.id string (e.g. "R1", "LAB2")
 
 
 @router.post("/runs/{run_id}/move-session")
-def move_session(run_id: int, body: MoveSessionRequest, session: Session = Depends(get_session),
-                 _=Depends(require_faculty)):
-    """Drag-and-drop session move validation and re-solve."""
-    run = _get_done_run(run_id, session)
+def move_session(
+    run_id: int,
+    body: MoveSessionRequest,
+    db: Session = Depends(get_session),
+    _=Depends(require_faculty),
+):
+    """Drag-and-drop: move a single session to a new (day, period, room) slot.
+
+    Validates the move against hard constraints (slot exists, room type matches, no faculty
+    double-book at the target slot), applies the move to a copy of the stored solution, rebuilds
+    the display grids, persists a ManualEdit audit row, and writes the updated grids back to the
+    run so subsequent polls/loads see the edited timetable without a full re-solve.
+
+    Returns the full updated grids dict so the frontend can re-render in-place without a page
+    reload.
+    """
+    run = _get_done_run(run_id, db)
+    if run.solution is None:
+        raise HTTPException(status_code=409, detail="run has no stored solution")
+
     problem = problem_from_dict(run.problem_snapshot)
+    baseline = solution_from_dict(run.solution)
 
-    # Validation and move logic placeholder
-    # 1. Check constraints for (target_day, target_period, target_room_id)
-    # 2. Update run.grids if valid
-    # 3. Persistence
+    # ── 1. Find the target time slot ──────────────────────────────────────────────────────────
+    target_slot = next(
+        (t for t in problem.time_slots if t.day == body.target_day and t.period == body.target_period),
+        None,
+    )
+    if target_slot is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No time slot exists for day={body.target_day}, period={body.target_period}",
+        )
 
-    return {"status": "success", "message": "Drag-and-drop move implemented (validation logic placeholder)"}
+    # ── 2. Find the session requirement to move ───────────────────────────────────────────────
+    from engine.models import expand_requirements
+    requirements = {r.id: r for r in expand_requirements(problem)}
+    req = requirements.get(body.session_id)
+    if req is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session id {body.session_id!r} not found in this run's problem",
+        )
+    if req.is_break:
+        raise HTTPException(status_code=400, detail="Break sessions cannot be moved")
+    if req.fixed_time_slot_id is not None:
+        raise HTTPException(
+            status_code=400, detail="This session is pinned to a fixed slot and cannot be moved"
+        )
 
+    # ── 3. Validate the target room ──────────────────────────────────────────────────────────
+    rooms_by_id = problem.room_by_id()
+    target_room = rooms_by_id.get(body.target_room_id)
+    if target_room is None:
+        raise HTTPException(status_code=400, detail=f"Room {body.target_room_id!r} not found")
+
+    # Check room type compatibility
+    required_room_type = getattr(req, "room_type", "classroom")
+    if required_room_type not in ("none", "") and target_room.room_type != required_room_type:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Session {body.session_id!r} requires a {required_room_type!r} but "
+                f"room {body.target_room_id!r} is a {target_room.room_type!r}"
+            ),
+        )
+
+    # ── 4. Build slot occupancy map from the current solution ─────────────────────────────────
+    # Maps (slot_id) -> set of faculty_ids already scheduled there (for double-book check)
+    # Maps (slot_id, room_id) -> session_id already occupying that cell (for room conflict)
+    faculty_at_slot: dict[int, set[str]] = {}
+    room_at_slot: dict[tuple[int, str], str] = {}  # (slot_id, room_id) -> session_id
+
+    by_session: dict[str, Assignment] = baseline.assignment_by_session()
+    for a in baseline.assignments:
+        r = requirements.get(a.session_id)
+        if r is None or r.is_break:
+            continue
+        # A lab (duration=2) occupies two consecutive slots
+        for k in range(r.duration_slots):
+            slot_in_run = next(
+                (t for t in problem.time_slots if t.id == a.time_slot_id + k), None
+            )
+            sid = a.time_slot_id + k if slot_in_run else a.time_slot_id
+            if r.faculty_id:
+                faculty_at_slot.setdefault(sid, set()).add(r.faculty_id)
+            cell_key = (a.time_slot_id + k, a.room_id)
+            if cell_key not in room_at_slot:
+                room_at_slot[cell_key] = a.session_id
+
+    # Current assignment for the session being moved (we'll free it before checking conflicts)
+    current_assignment = by_session.get(body.session_id)
+    if current_assignment is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Session {body.session_id!r} has no assignment in the stored solution",
+        )
+
+    # Remove the session's current occupancy from the maps before conflict-checking the target
+    current_req = requirements[body.session_id]
+    for k in range(current_req.duration_slots):
+        old_sid = current_assignment.time_slot_id + k
+        if current_req.faculty_id and old_sid in faculty_at_slot:
+            faculty_at_slot[old_sid].discard(current_req.faculty_id)
+        old_room_key = (old_sid, current_assignment.room_id)
+        if room_at_slot.get(old_room_key) == body.session_id:
+            del room_at_slot[old_room_key]
+
+    # ── 5. Conflict checks at the target slot ────────────────────────────────────────────────
+    for k in range(req.duration_slots):
+        check_slot_id = target_slot.id + k  # consecutive slots for labs
+        # Faculty double-booking
+        if req.faculty_id and req.faculty_id in faculty_at_slot.get(check_slot_id, set()):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Faculty {req.faculty_id!r} is already scheduled in "
+                    f"day={body.target_day}, period={body.target_period + k}"
+                ),
+            )
+        # Room already occupied by another session
+        occupant = room_at_slot.get((check_slot_id, body.target_room_id))
+        if occupant is not None and occupant != body.session_id:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Room {body.target_room_id!r} is already occupied at "
+                    f"day={body.target_day}, period={body.target_period + k} "
+                    f"by session {occupant!r}"
+                ),
+            )
+        # Division already has a session at this slot (can't be in two places at once)
+        for a2 in baseline.assignments:
+            r2 = requirements.get(a2.session_id)
+            if r2 is None or r2.is_break or r2.division_id != req.division_id or a2.session_id == body.session_id:
+                continue
+            for k2 in range(r2.duration_slots):
+                if a2.time_slot_id + k2 == check_slot_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Division {req.division_id!r} already has session {a2.session_id!r} "
+                            f"at day={body.target_day}, period={body.target_period + k}"
+                        ),
+                    )
+
+    # ── 6. Apply the move — create a new solution with the updated assignment ─────────────────
+    new_assignments = [
+        Assignment(
+            session_id=a.session_id,
+            time_slot_id=target_slot.id,
+            room_id=body.target_room_id,
+        )
+        if a.session_id == body.session_id
+        else a
+        for a in baseline.assignments
+    ]
+    new_solution = Solution(
+        assignments=new_assignments,
+        solver_name=baseline.solver_name,
+        wall_clock_seconds=baseline.wall_clock_seconds,
+        objective_value=baseline.objective_value,
+        status=baseline.status,
+    )
+
+    # ── 7. Rebuild grids and score ────────────────────────────────────────────────────────────
+    from engine.io_json import solution_to_dict
+    new_grids = annotate_grids(
+        solution_to_grids(new_solution, problem), run.division_meta or {}
+    )
+    sc = score(new_solution, problem)
+
+    # ── 8. Persist: ManualEdit audit row + updated run fields ─────────────────────────────────
+    edit = ManualEdit(
+        run_id=run_id,
+        session_id=body.session_id,
+        from_slot_id=current_assignment.time_slot_id,
+        from_room_id=current_assignment.room_id,
+        to_slot_id=target_slot.id,
+        to_room_id=body.target_room_id,
+    )
+    db.add(edit)
+
+    # Mutate the run's stored solution + grids so future loads see the edit
+    from sqlalchemy import text as sa_text
+    import json as _json
+    db.exec(  # type: ignore[attr-defined]
+        sa_text(
+            "UPDATE timetablerun SET solution = :sol, grids = :grids, "
+            "hard = :hard, soft = :soft WHERE id = :rid"
+        ).bindparams(
+            sol=_json.dumps(solution_to_dict(new_solution)),
+            grids=_json.dumps(new_grids),
+            hard=sc.hard_violations,
+            soft=round(sc.soft_cost, 1),
+            rid=run_id,
+        )
+    )
+    db.commit()
+
+    return {
+        "status": "ok",
+        "moved_session": body.session_id,
+        "from_slot_id": current_assignment.time_slot_id,
+        "from_room_id": current_assignment.room_id,
+        "to_slot_id": target_slot.id,
+        "to_room_id": body.target_room_id,
+        "hard": sc.hard_violations,
+        "soft": round(sc.soft_cost, 1),
+        "grids": new_grids,
+    }
+
+@router.post("/runs/{run_id}/adjust")
 def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(get_session),
                _=Depends(require_faculty)):
     """Disruption re-plan against a stored run (design.md §7). Loads the run's problem snapshot +
@@ -316,7 +526,7 @@ def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(g
                             detail=f"extra_relaxed_days must be 0..{problem.days_per_week - 1}")
 
     affected = affected_slots_for_day(problem, body.day, from_period=body.from_period)
-    result = replan(problem, baseline, affected,
+    result = replan(problem, baseline, affected, constraint_query=body.constraint_query,
                     relaxed_days=frozenset({body.day} | set(body.extra_relaxed_days)),
                     time_limit_s=body.time_limit_s, solver=body.solver)
 

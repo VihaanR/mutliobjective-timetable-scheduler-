@@ -162,6 +162,7 @@ class Solution:
     wall_clock_seconds: float
     objective_value: float | None = None
     status: str = "UNKNOWN"    # "OPTIMAL" | "FEASIBLE" | "INFEASIBLE" | "TIMEOUT"
+    extra_data: dict | None = None
 
     def assignment_by_session(self) -> dict[str, Assignment]:
         return {a.session_id: a for a in self.assignments}

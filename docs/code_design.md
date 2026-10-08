@@ -6,22 +6,20 @@ is meant to work going forward. This file is a running design record, not user-f
 ## 1. Where this project started
 
 `mutliobjective-timetable-scheduler-` began as a single bespoke CP-SAT model
-(`data.py`/`model.py`/`solver.py`/`pareto.py`) hardcoded to one dataset: DJSCE CSE-DS, 2nd year
+(`data.py`/`model.py`/`solver.py`) hardcoded to one dataset: DJSCE CSE-DS, 2nd year
 (SY), Sem IV. Its constraints (`twice`, `sibling_sync`, `day_edges_only` subject flags) are
-hand-tuned to that exact structure — not a generic timetabling engine. It has a genuinely good
-3-axis Pareto multi-objective sweep (faculty/student/resource scores, epsilon-constraint) that a
-sibling project (`timetable/`) didn't have.
+hand-tuned to that exact structure — not a generic timetabling engine.
 
 The sibling `timetable/` project has the opposite shape: a fully generic engine (any
 divisions/courses/faculty/rooms; Greedy/MIP/GA/CP-SAT solvers, one shared `scoring.py`) plus a
 mature DB-backed dashboard platform (FastAPI + SQLite, entity CRUD, auth, background jobs,
-calendar OCR) — but no Pareto sweep wired into its API (though the underlying CP-SAT model already
-had the epsilon-constraint machinery built and sitting unused in a research script).
+calendar OCR).
 
 The plan (see the earlier session's approved plan at
 `C:\Users\Vihaan\.claude\plans\witty-cuddling-cocoa.md`): port the generic engine + dashboard into
-this repo, keep the bespoke SY pipeline exactly as it was (additive, nothing broken), wire the
-Pareto sweep onto the generic engine, and build a real timetable-image OCR importer.
+this repo, keep the bespoke SY pipeline exactly as it was (additive, nothing broken),
+and build a real timetable-image OCR importer.
+
 
 ## 2. What's built so far (Phase A)
 
@@ -129,21 +127,21 @@ inline in the JSON files' `_transcription_note` fields):
    Science"; BTech-D2: "Geospatial Data Science") — likely a source-document inconsistency.
 2. Division D3's class/semester header wasn't in the photo (see table above).
 
-## 5. Phase B — done: generic Pareto sweep + branch selector + individual-solver UI
+
 
 Built and committed (`01c6063`):
 - `engine/pareto_sweep.py` — pure `sweep()`/`sweep_pair()` functions reusing
-  `CPSATSolver.solve_pareto_point()` (AUGMECON2 epsilon-constraint), no CSV/plotting side effects.
-- `webapp/routers/pareto.py` — `POST /api/pareto` (background job via `ParetoRun` table, mirrors
+
+
   `TimetableRun`'s queued→running→done/failed pattern), `GET /api/pareto/{id}`,
   `GET /api/pareto/runs`. Deliberately not `GET /api/pareto` bare — that path is the existing
   bespoke SY-only 3-axis endpoint served directly from `server.py`; kept untouched and separate.
-- `platform.html`/`platform.js` — a Pareto panel (pair checkboxes, time budget, poll, results table
+
   + inline-SVG frontier scatter, no chart library).
 
 **Two real bugs surfaced by end-to-end testing, both fixed:**
 
-1. **No branch selector existed anywhere in the UI.** Every Generate/Compare/Pareto request
+
    implicitly solved `branch_ids=None` (whole institution), which only ever "worked" by accident
    when exactly one branch existed. Once TY/BTech were seeded alongside SY, the shared division
    names (`D1`/`D2`/`D3` across all three) collide in a whole-institution solve — confirmed live:

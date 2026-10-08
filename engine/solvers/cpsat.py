@@ -6,7 +6,7 @@ adds a genuinely richer objective CP-SAT can express natively that MIP's linear-
 cannot: per-(division, day) gap-minimization via reified "occupied at period p" booleans and
 AddMaxEquality-based before/after indicators. This -- alongside AddNoOverlap-style reasoning being
 unnecessary here since occupancy is already tracked per slot -- is the concrete mechanism behind
-CP-SAT's quality edge in the team's own benchmark (best soft-cost, longest runtime).
+CP-SAT's quality edge.
 
 The objective is built as four named categories (`rooms`, `labs`, `students`, `faculty`) instead
 of one flat sum. `solve()` still minimizes their combined total (unchanged end-to-end behavior for
@@ -20,10 +20,17 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
+from engine.adaptive import (
+    AdaptiveConfig,
+    AdaptiveWeightController,
+    DEFAULT_ADAPTIVE_BASE_WEIGHTS,
+    canonical_constraint_name,
+    compute_normalization_denominators,
+)
 from engine.models import (
     Assignment, CourseCategory, ProblemInstance, Solution, SessionType, expand_requirements,
 )
-from engine.scoring import COMPACT_DAY_SPAN, MAX_CONTINUOUS_TEACHING_PERIODS  # keep in sync with scorer
+from engine.scoring import COMPACT_DAY_SPAN, MAX_CONTINUOUS_TEACHING_PERIODS, ScoreResult, score  # keep in sync with scorer
 from engine.solvers.base import SolverBase
 from engine.solvers.candidates import (
     NO_ROOM, batch_group_members, build_candidates, slots_by_day, sync_group_members,
@@ -130,13 +137,13 @@ class _BuiltModel:
     requirements: list
     candidates: dict
     objective_categories: dict[str, list]
+    soft_constraint_terms: dict[str, list]
 
 
 def _build_model(problem: ProblemInstance) -> _BuiltModel:
     """Build the shared CP-SAT model: every hard constraint, plus the objective terms grouped
     into four named categories. Does not set an objective or solve -- callers do that (`solve()`
-    minimizes the combined total; `solve_pareto_point()` bounds some categories and optimizes
-    one)."""
+    minimizes the combined total)."""
     model = cp_model.CpModel()
 
     requirements = expand_requirements(problem)
@@ -412,11 +419,12 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     # "rooms": room-capacity waste. "labs": late-lab-slot placement penalty. "students": break
     # placement + day-span + gap-minimization (division/student schedule quality). "faculty":
     # weekly workload balance (new -- previously faculty load was only a hard cap, never
-    # minimized). See design.md Sec 15.3 / research/pareto_sweep.py for why these four exist as
+    # minimized). See design.md Sec 15.3 for why these four exist as
     # separately addressable expressions rather than one flat sum.
-    room_obj_terms: list = []
-    lab_obj_terms: list = []
-    student_obj_terms: list = []
+    room_waste_unscaled: list = []
+    lab_unscaled: list = []
+    break_unscaled: list = []
+    span_unscaled: list = []
     for req in requirements:
         division = divisions_by_id.get(req.division_id)
         occupants = (division.student_count // 2) if (req.batch_id and division) else (division.student_count if division else 0)
@@ -426,12 +434,12 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 room = rooms_by_id[room_id]
                 waste = max(0, room.capacity - occupants)
                 if waste:
-                    room_obj_terms.append(int(waste * 1) * var)  # calibrated integral waste weight
+                    room_waste_unscaled.append(int(waste) * var)
             if req.session_type == SessionType.PRACTICAL:
                 day_slots = days[day]
                 ts = next(t for t in day_slots if t.id == start_id)
                 if len(day_slots) >= 2 and ts.period in {day_slots[-1].period, day_slots[-2].period}:
-                    lab_obj_terms.append(200 * var)
+                    lab_unscaled.append(var)
             if req.is_break:
                 # vary the target across days (rotate through the legal mid-day band by day
                 # index) so breaks spread over the week instead of all landing on one period --
@@ -445,7 +453,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                     target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
                 dist = abs(ts.period - target_period)
                 if dist:
-                    student_obj_terms.append(15 * dist * var)
+                    break_unscaled.append(dist * var)
 
     # native gap-minimization / compact campus stay: penalize late periods beyond compact 6-hour span.
     # Scaled with weight 1 to keep student_score in the well-calibrated 200-500 range across 3 years.
@@ -466,7 +474,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                     span_from_first = end_p - first_period
                     excess_span = max(0, span_from_first - 6)
                     if excess_span > 0:
-                        student_obj_terms.append(int(GAP_WEIGHT * excess_span) * var)
+                        span_unscaled.append(excess_span * var)
 
     # "faculty": per-faculty day-to-day load balance (max daily load - min daily load across the
     # week, summed over faculty). NOTE: faculty->course assignment is fixed input, not a solver
@@ -477,7 +485,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     # control is which *day* each of a faculty's sessions lands on, so a per-faculty day-load
     # range is the genuinely schedule-dependent fairness proxy available here -- distinct from,
     # but in the same spirit as, scoring.py's `teacher_workload_spread` (variance of daily hours).
-    faculty_obj_terms: list = []
+    workload_unscaled: list = []
     for fid in faculty_week_terms:
         day_cap = 6  # matches the <=6h/day hard constraint above
         day_load_vars = []
@@ -497,7 +505,13 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         model.AddMinEquality(min_day, day_load_vars)
         day_range = model.NewIntVar(0, day_cap, f"day_load_range_{fid}")
         model.Add(day_range == max_day - min_day)
-        faculty_obj_terms.append(FACULTY_BALANCE_WEIGHT * day_range)
+        workload_unscaled.append(day_range)
+
+    # Legacy baseline categories (retains exact multipliers and groupings)
+    room_obj_terms = room_waste_unscaled
+    lab_obj_terms = [200 * v for v in lab_unscaled]
+    student_obj_terms = [15 * v for v in break_unscaled] + [GAP_WEIGHT * v for v in span_unscaled]
+    faculty_obj_terms = [FACULTY_BALANCE_WEIGHT * v for v in workload_unscaled]
 
     objective_categories = {
         "rooms": room_obj_terms,
@@ -507,75 +521,273 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "resource": room_obj_terms + lab_obj_terms,
     }
 
+    soft_constraint_terms = {
+        "room_capacity_waste": room_waste_unscaled,
+        "lab_not_before_final_slots": lab_unscaled,
+        "break_not_midmorning": break_unscaled,
+        "day_span": span_unscaled,
+        "teacher_workload_spread": workload_unscaled,
+    }
+
     return _BuiltModel(
         model=model, x=x, requirements=requirements, candidates=candidates,
         objective_categories=objective_categories,
+        soft_constraint_terms=soft_constraint_terms,
     )
+
+
+def _apply_baseline_objective(built: _BuiltModel) -> None:
+    all_terms = [t for cat in DEFAULT_SOLVE_CATEGORIES for t in built.objective_categories[cat]]
+    if all_terms:
+        built.model.Minimize(sum(all_terms))
+
+
+def _apply_weighted_objective(built: _BuiltModel, weights: dict[str, float]) -> None:
+    weighted_terms = []
+    for c_name, terms in built.soft_constraint_terms.items():
+        canonical_k = canonical_constraint_name(c_name)
+        w = weights.get(canonical_k, weights.get(c_name, 0.0))
+        if w != 0.0:
+            for t in terms:
+                weighted_terms.append(w * t)
+    if weighted_terms:
+        built.model.Minimize(sum(weighted_terms))
 
 
 class CPSATSolver(SolverBase):
     name = "cpsat"
 
-    def solve(self, problem: ProblemInstance, time_limit_s: float = 300,
-               warm_start: Solution | None = None,
-               extra_solver_params: dict | None = None,
-               absent_classes: dict[str, list[str]] | None = None) -> Solution:
+    def __init__(
+        self,
+        optimization_mode: str = "baseline",
+        adaptive_config: AdaptiveConfig | None = None,
+    ) -> None:
+        self.optimization_mode = optimization_mode
+        self.adaptive_config = adaptive_config
+        self.last_adaptive_controller: AdaptiveWeightController | None = None
+        self.adaptive_history: list[dict] = []
+
+    def solve(
+        self,
+        problem: ProblemInstance,
+        time_limit_s: float = 300,
+        warm_start: Solution | None = None,
+        extra_solver_params: dict | None = None,
+        absent_classes: dict[str, list[str]] | None = None,
+        optimization_mode: str | None = None,
+        adaptive_config: AdaptiveConfig | None = None,
+    ) -> Solution:
+        mode = optimization_mode
+        if mode is None and extra_solver_params and "optimization_mode" in extra_solver_params:
+            mode = str(extra_solver_params["optimization_mode"])
+        if mode is None:
+            mode = getattr(self, "optimization_mode", "baseline")
+        mode = (mode or "baseline").lower()
+
+        if mode == "baseline":
+            return self._solve_baseline(
+                problem, time_limit_s, warm_start, extra_solver_params
+            )
+        elif mode == "priority":
+            return self._solve_priority(
+                problem, time_limit_s, warm_start, extra_solver_params, adaptive_config
+            )
+        elif mode == "adaptive":
+            return self._solve_adaptive(
+                problem, time_limit_s, warm_start, extra_solver_params, adaptive_config
+            )
+        else:
+            return self._solve_baseline(
+                problem, time_limit_s, warm_start, extra_solver_params
+            )
+
+    def _solve_baseline(
+        self,
+        problem: ProblemInstance,
+        time_limit_s: float,
+        warm_start: Solution | None,
+        extra_solver_params: dict | None,
+    ) -> Solution:
         start_time = time.time()
         built = _build_model(problem)
-        all_terms = [t for cat in DEFAULT_SOLVE_CATEGORIES for t in built.objective_categories[cat]]
-        if all_terms:
-            built.model.Minimize(sum(all_terms))
+        _apply_baseline_objective(built)
         solution, _category_values = _solve_and_decode(
-            built, problem, time_limit_s, warm_start, extra_solver_params, start_time)
+            built, problem, time_limit_s, warm_start, extra_solver_params, start_time
+        )
         return solution
+
+    def _solve_priority(
+        self,
+        problem: ProblemInstance,
+        time_limit_s: float,
+        warm_start: Solution | None,
+        extra_solver_params: dict | None,
+        adaptive_config: AdaptiveConfig | None,
+    ) -> Solution:
+        start_time = time.time()
+        built = _build_model(problem)
+        cfg = adaptive_config or self.adaptive_config or AdaptiveConfig()
+        weights = cfg.base_weights or DEFAULT_ADAPTIVE_BASE_WEIGHTS
+        _apply_weighted_objective(built, weights)
+        solution, _category_values = _solve_and_decode(
+            built, problem, time_limit_s, warm_start, extra_solver_params, start_time
+        )
+        return solution
+
+    def _solve_adaptive(
+        self,
+        problem: ProblemInstance,
+        time_limit_s: float,
+        warm_start: Solution | None,
+        extra_solver_params: dict | None,
+        adaptive_config: AdaptiveConfig | None,
+    ) -> Solution:
+        start_time = time.time()
+        cfg = adaptive_config or self.adaptive_config or AdaptiveConfig()
+        built = _build_model(problem)
+
+        denominators = compute_normalization_denominators(problem)
+        controller = AdaptiveWeightController(
+            config=cfg,
+            base_weights=cfg.base_weights,
+            normalization_denominators=denominators,
+        )
+
+        max_iters = max(1, cfg.max_iterations)
+        incumbent_solution: Solution | None = warm_start
+        total_budget_s = float(time_limit_s)
+        last_iter_solution: Solution | None = None
+
+        for iter_idx in range(1, max_iters + 1):
+            elapsed_so_far = time.time() - start_time
+            remaining_budget_s = max(0.0, total_budget_s - elapsed_so_far)
+            if remaining_budget_s < 1.0 and iter_idx > 1:
+                break
+
+            if cfg.time_limit_per_iteration_s is not None:
+                iter_time_limit = min(remaining_budget_s, float(cfg.time_limit_per_iteration_s))
+                stop_on_first = False
+            else:
+                remaining_iters = max(1, max_iters - iter_idx + 1)
+                if incumbent_solution is None:
+                    # Cold start: Give the solver full remaining budget to establish a feasible incumbent.
+                    # Stop search as soon as the first feasible solution is found so remaining budget
+                    # is preserved for subsequent adaptive iterations.
+                    iter_time_limit = remaining_budget_s
+                    stop_on_first = (max_iters > 1)
+                else:
+                    iter_time_limit = min(remaining_budget_s, max(5.0, remaining_budget_s / remaining_iters))
+                    stop_on_first = False
+
+            _apply_weighted_objective(built, controller.current_weights)
+
+            iter_start = time.time()
+            iter_solution, _cat_vals = _solve_and_decode(
+                built,
+                problem,
+                iter_time_limit,
+                warm_start=incumbent_solution,
+                extra_solver_params=extra_solver_params,
+                start_time=iter_start,
+                stop_on_first=stop_on_first,
+            )
+            iter_elapsed = time.time() - iter_start
+            last_iter_solution = iter_solution
+
+            if iter_solution.status in ("OPTIMAL", "FEASIBLE"):
+                sc = score(iter_solution, problem)
+            else:
+                sc = ScoreResult(hard_violations=9999, soft_cost=999999.0, details={})
+
+            controller.update(
+                iteration=iter_idx,
+                solution=iter_solution,
+                score_result=sc,
+                solve_time=iter_elapsed,
+                problem=problem,
+            )
+
+            if iter_solution.status in ("OPTIMAL", "FEASIBLE"):
+                incumbent_solution = controller.best_solution
+
+            if controller.converged:
+                break
+
+        final_solution = controller.best_solution or last_iter_solution
+        if final_solution is None:
+            return Solution(
+                assignments=[],
+                solver_name="cpsat",
+                wall_clock_seconds=time.time() - start_time,
+                status="TIMEOUT",
+            )
+
+        final_solution.wall_clock_seconds = time.time() - start_time
+        final_solution.extra_data = {
+            "optimization_mode": "adaptive",
+            "adaptive_iterations": len(controller.history),
+            "converged": controller.converged,
+            "convergence_reason": controller.convergence_reason,
+            "best_iteration": controller.best_iteration,
+            "final_weights": dict(controller.current_weights),
+            "best_weights": dict(controller.best_weights or controller.current_weights),
+            "history": controller.history,
+        }
+        self.last_adaptive_controller = controller
+        self.adaptive_history = controller.history
+        return final_solution
 
 
 
 class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
-    def __init__(self, built: _BuiltModel, problem: ProblemInstance, callback_fn=None):
+    def __init__(self, built: _BuiltModel, problem: ProblemInstance, callback_fn=None, stop_on_first: bool = False):
         super().__init__()
         self.built = built
         self.problem = problem
         self.callback_fn = callback_fn
         self.solution_count = 0
+        self.stop_on_first = stop_on_first
 
     def on_solution_callback(self):
         self.solution_count += 1
-        if not self.callback_fn:
-            return
-        try:
-            assignments: list[Assignment] = []
-            for req in self.built.requirements:
-                for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
-                    if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
-                        assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
-                        break
-            sol = Solution(
-                assignments=assignments,
-                solver_name="cpsat",
-                wall_clock_seconds=self.WallTime(),
-                objective_value=self.ObjectiveValue(),
-                status="FEASIBLE",
-            )
-            cat_vals = {}
-            for category, terms in self.built.objective_categories.items():
-                if not terms:
-                    cat_vals[category] = 0
-                else:
-                    try:
-                        cat_vals[category] = int(sum(self.Value(t) for t in terms))
-                    except Exception:
+        if self.callback_fn:
+            try:
+                assignments: list[Assignment] = []
+                for req in self.built.requirements:
+                    for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
+                        if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
+                            assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
+                            break
+                sol = Solution(
+                    assignments=assignments,
+                    solver_name="cpsat",
+                    wall_clock_seconds=self.WallTime(),
+                    objective_value=self.ObjectiveValue(),
+                    status="FEASIBLE",
+                )
+                cat_vals = {}
+                for category, terms in self.built.objective_categories.items():
+                    if not terms:
                         cat_vals[category] = 0
-            self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
-        except Exception:
-            pass
+                    else:
+                        try:
+                            cat_vals[category] = int(sum(self.Value(t) for t in terms))
+                        except Exception:
+                            cat_vals[category] = 0
+                self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
+            except Exception:
+                pass
+        if self.stop_on_first:
+            self.StopSearch()
 
 
 def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s: float,
                        warm_start: Solution | None, extra_solver_params: dict | None,
-                       start_time: float, solution_callback=None) -> tuple[Solution, dict[str, int | None]]:
+                       start_time: float, solution_callback=None,
+                       stop_on_first: bool = False) -> tuple[Solution, dict[str, int | None]]:
     model, x, requirements, candidates = built.model, built.x, built.requirements, built.candidates
 
+    model.ClearHints()
     if warm_start is not None:
         assigned = warm_start.assignment_by_session()
         for req in requirements:
@@ -619,7 +831,7 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
     if extra_solver_params:
         for key, value in extra_solver_params.items():
             setattr(solver.parameters, key, value)
-    cb = _IntermediateCallback(built, problem, solution_callback) if solution_callback else None
+    cb = _IntermediateCallback(built, problem, solution_callback, stop_on_first=stop_on_first) if (solution_callback or stop_on_first) else None
     status = solver.Solve(model, cb) if cb else solver.Solve(model)
     elapsed = time.time() - start_time
 

@@ -199,6 +199,20 @@ the fork. Arms A and B therefore live in different virtualenvs and cannot run in
 .venv-fork/Scripts/python     -m research.fork_benchmark --compare research/base20.json research/fork20.json
 ```
 
+## Adaptive CP-SAT Optimization
+
+In addition to the C++ search modifications, the repository includes an algorithmic **Adaptive CP-SAT** objective controller (`engine/adaptive.py`) that iteratively adjusts soft-constraint weights using feedback from prior CP-SAT solves and warm-start hints (`AddHint`):
+
+- **Modes supported**: `baseline` (stock formulation), `priority` (fixed weights), `adaptive` (dynamic reweighting).
+- **Run benchmark**:
+  ```bash
+  python -m research.adaptive_cpsat_benchmark --dataset reference --time-limit 45 --max-iterations 3
+  ```
+- **Run tests**:
+  ```bash
+  pytest tests/engine/test_adaptive.py -v
+  ```
+
 ## Tests
 
 ```bash

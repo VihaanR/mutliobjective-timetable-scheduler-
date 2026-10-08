@@ -55,6 +55,8 @@ def run_generation(run_id: int) -> None:
             problem = problem_from_dict(run.problem_snapshot)
             stage_reports = None
 
+            opt_mode = (run.division_meta or {}).get("_optimization_mode", "baseline")
+
             if run.solver == "pipeline":
                 config = PipelineConfig(
                     cpsat_time_limit_s=run.time_limit,
@@ -65,14 +67,32 @@ def run_generation(run_id: int) -> None:
                 solution = result.final
                 stage_reports = _stage_reports_from(result)
                 wall_clock = result.total_wall_clock_s
+            elif run.solver == "cpsat":
+                from engine.solvers.cpsat import CPSATSolver
+                solution = CPSATSolver(optimization_mode=opt_mode).solve(problem, time_limit_s=run.time_limit)
+                wall_clock = solution.wall_clock_seconds
+                if solution.extra_data and "history" in solution.extra_data:
+                    stage_reports = [
+                        {
+                            "name": f"Adaptive Iteration {item['iteration']}",
+                            "status": item.get("solver_status", "FEASIBLE"),
+                            "wall_clock_s": round(item.get("solve_time", 0.0), 1),
+                            "hard": 0,
+                            "soft": round(item.get("soft_cost", 0.0), 1),
+                            "best_hard": 0,
+                            "best_soft": round(item.get("best_score", {}).get("soft_cost", item.get("soft_cost", 0.0)), 1),
+                            "improved": item.get("improved", False),
+                        }
+                        for item in solution.extra_data["history"]
+                    ]
             else:
                 solution = SOLVERS[run.solver]().solve(problem, time_limit_s=run.time_limit)
                 wall_clock = solution.wall_clock_seconds
 
-            # A solver can exhaust its time limit before producing any incumbent.  Treating that
-            # empty result as a completed timetable makes the scorer count every required
-            # session as a hard violation, which is both misleading and unusable in the UI.
-            if solution.status not in {"FEASIBLE", "OPTIMAL"}:
+            # A solver can exhaust its time limit before producing any incumbent (e.g. CP-SAT UNKNOWN/INFEASIBLE).
+            # Treating that empty result as a completed timetable makes the scorer count every required
+            # session as a hard violation. PARTIAL, FEASIBLE, and OPTIMAL have actual assignments.
+            if solution.status not in {"FEASIBLE", "OPTIMAL", "PARTIAL"}:
                 run.status = "failed"
                 run.error = (
                     f"{run.solver} ended with {solution.status} before finding a feasible "

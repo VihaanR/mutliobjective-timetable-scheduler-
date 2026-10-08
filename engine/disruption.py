@@ -237,7 +237,8 @@ def _replan_resolve(problem: ProblemInstance, baseline: Solution, affected: froz
 
 def replan(problem: ProblemInstance, baseline: Solution, affected_slot_ids: frozenset[int],
            relaxed_days: frozenset[int] | None = None, time_limit_s: float = 60,
-           mode: str = "resolve", solver: str = "cpsat") -> AdjustmentResult:
+           mode: str = "resolve", solver: str = "cpsat",
+           constraint_query: str | None = None) -> AdjustmentResult:
     """Re-plan around a disruption. Returns an overlay; neither `problem` nor `baseline` is mutated.
 
     `mode="resolve"` (default) re-solves the whole week from scratch around the blocked window --

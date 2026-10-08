@@ -356,10 +356,53 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         for (start_id, _occ, day, room_id) in candidates[req.id]:
             if start_id == first_slot_id_by_day.get(day):
                 first_slot_terms.setdefault((req.division_id, day), []).append(x[(req.id, start_id, room_id)])
-    for (division_id, day), terms in first_slot_terms.items():
-        if day in relaxed:
-            continue
-        model.Add(sum(terms) >= 1)
+    for division in problem.divisions:
+        for day in days:
+            if day in relaxed:
+                continue
+            terms = first_slot_terms.get((division.id, day), [])
+            if terms:
+                model.Add(sum(terms) >= 1)
+
+    # division occupancy (teaching sessions + breaks) for idle gap minimization
+    division_all_terms: dict = {}
+    seen_all_groups: set[str] = set()
+    for req in requirements:
+        if req.batch_group_id:
+            if req.batch_group_id in seen_all_groups:
+                continue
+            seen_all_groups.add(req.batch_group_id)
+        for (start_id, occ_ids, day, room_id) in candidates[req.id]:
+            var = x[(req.id, start_id, room_id)]
+            for sid in occ_ids:
+                division_all_terms.setdefault((req.division_id, sid), []).append(var)
+
+    idle_gaps_unscaled: list = []
+    for division in problem.divisions:
+        for day, day_slots in days.items():
+            if day in relaxed or not day_slots:
+                continue
+            P = len(day_slots)
+            occ = []
+            for ts in day_slots:
+                terms = division_all_terms.get((division.id, ts.id), [])
+                o = model.NewBoolVar(f"occ_{division.id}_{day}_{ts.period}")
+                if terms:
+                    model.Add(o == sum(terms))
+                else:
+                    model.Add(o == 0)
+                occ.append(o)
+
+            active = [model.NewBoolVar(f"act_{division.id}_{day}_{p}") for p in range(P)]
+            for p in range(P):
+                model.Add(active[p] >= occ[p])
+            for p in range(P - 1):
+                model.Add(active[p] >= active[p + 1])
+
+            for p in range(P):
+                gap_var = model.NewIntVar(0, 1, f"gap_{division.id}_{day}_{p}")
+                model.Add(gap_var == active[p] - occ[p])
+                idle_gaps_unscaled.append(gap_var)
 
     # no all-theory day: each day must have >=1 practical/skill session, for divisions that offer enough sessions
     practical_or_skill_terms: dict = {}
@@ -487,7 +530,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
     # Legacy baseline categories (retains exact multipliers and groupings)
     room_obj_terms = room_waste_unscaled
     lab_obj_terms = [200 * v for v in lab_unscaled]
-    student_obj_terms = [15 * v for v in break_unscaled] + [GAP_WEIGHT * v for v in span_unscaled]
+    student_obj_terms = [15 * v for v in break_unscaled] + [GAP_WEIGHT * v for v in span_unscaled] + [25 * g for g in idle_gaps_unscaled]
     faculty_obj_terms = [FACULTY_BALANCE_WEIGHT * v for v in workload_unscaled]
 
     objective_categories = {
@@ -503,6 +546,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "lab_not_before_final_slots": lab_unscaled,
         "break_not_midmorning": break_unscaled,
         "day_span": span_unscaled,
+        "idle_gaps": idle_gaps_unscaled,
         "teacher_workload_spread": workload_unscaled,
     }
 
@@ -649,7 +693,7 @@ class CPSATSolver(SolverBase):
                 if incumbent_solution is None:
                     # Cold start: Give the solver full remaining budget to establish a feasible incumbent.
                     iter_time_limit = remaining_budget_s
-                    stop_on_first = False
+                    stop_on_first = (max_iters > 1)
                 else:
                     iter_time_limit = min(remaining_budget_s, max(5.0, remaining_budget_s / remaining_iters))
                     stop_on_first = False

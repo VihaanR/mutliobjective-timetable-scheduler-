@@ -656,11 +656,15 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
       td.ondrop = async (event) => {
         event.preventDefault();
         td.classList.remove("drag-over", "drag-over-invalid");
-        if (!_dragData || !currentRunId) return;
+        const dragInfo = _dragData;
+        if (!dragInfo || !currentRunId) return;
+
+        const draggedSessionId = dragInfo.session_id;
+        const originalRoomId = dragInfo.original_room_id;
 
         // Determine target_room_id: in room/lab view it's the room item's id;
         // in division/teacher view we keep the session's original room.
-        let targetRoomId = _dragData.original_room_id;
+        let targetRoomId = originalRoomId;
         if (mode === "classrooms" || mode === "labs") {
           targetRoomId = String(item.id);
         }
@@ -670,7 +674,7 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              session_id: _dragData.session_id,
+              session_id: draggedSessionId,
               target_day: dayIdx,
               target_period: p.period,
               target_room_id: targetRoomId,
@@ -681,7 +685,7 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
             const data = await response.json();
             // Re-render with the updated grids returned by the server
             currentGrids = data.grids;
-            dragMoveIds.add(_dragData.session_id);
+            dragMoveIds.add(draggedSessionId);
             renderTabs();
             renderGrid();
             showToast(

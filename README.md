@@ -141,7 +141,6 @@ the fork at import and enables both features automatically.
 ├── research/               Benchmark harness and 20-seed result data
 ├── tests/                  pytest suite
 ├── data/                   Reference DJSCE datasets
-├── docs/                   Design notes and the source-modification guide
 └── .github/workflows/      CI: builds fork + unpatched baseline wheels
 ```
 

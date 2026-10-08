@@ -107,13 +107,11 @@ v:/Projects/IPD/mutliobjective-timetable-scheduler-/
 │       └── login.html                       # Authentication page
 │
 ├── data/                                    # DATASETS & TRANSCRIPTIONS
-│   ├── reference/                           # Canonical verified JSON datasets for seeding
-│   │   ├── djsce_cse_ds_sy_sem4.json        # SY Sem IV (2nd Year)
-│   │   ├── djsce_sy_sem3_jul_dec_2026.json  # SY Sem III (2nd Year)
-│   │   ├── djsce_ty_d1_sem5_jul_dec_2026.json # TY Sem V Division D1 (3rd Year)
-│   │   └── djsce_btech_d2_sem7_jul_dec_2026.json # BTech Sem VII Division D2 (4th Year)
-│   └── ocr_drafts/                          # Raw OCR transcriptions and manual verification notes
-│       └── djsce_all_years_july_dec_2026.md # Comprehensive transcription of photographed timetables
+│   └── reference/                           # Canonical verified JSON datasets for seeding
+│       ├── djsce_cse_ds_sy_sem4.json        # SY Sem IV (2nd Year)
+│       ├── djsce_sy_sem3_jul_dec_2026.json  # SY Sem III (2nd Year)
+│       ├── djsce_ty_d1_sem5_jul_dec_2026.json # TY Sem V Division D1 (3rd Year)
+│       └── djsce_btech_d2_sem7_jul_dec_2026.json # BTech Sem VII Division D2 (4th Year)
 │
 ├── tests/                                   # TEST SUITE
 │   ├── test_data_bundle.py                  # Tests for bespoke SY data structures
@@ -146,14 +144,10 @@ v:/Projects/IPD/mutliobjective-timetable-scheduler-/
 │   ├── algo_test.cc                         # Standalone C++ test for custom search algorithms
 │   └── NOTICE                               # Apache-2.0 license and attribution
 │
-├── research/                                # BENCHMARKING & EXPERIMENT HARNESS
-│   ├── fork_benchmark.py                    # Multi-arm, multi-seed comparative benchmark script
-│   ├── adaptive_cpsat_benchmark.py          # Priority vs Adaptive CP-SAT comparison benchmark
-│   └── adaptive_benchmark_results.json      # Benchmark trajectory and comparison results
-│
-└── docs/                                    # TECHNICAL DOCUMENTATION
-    ├── code_design.md                       # Architectural design notes and multi-year rationale
-    └── or_tools_source_modification_guide.md # Step-by-step C++ patching and compilation guide
+└── research/                                # BENCHMARKING & EXPERIMENT HARNESS
+    ├── fork_benchmark.py                    # Multi-arm, multi-seed comparative benchmark script
+    ├── adaptive_cpsat_benchmark.py          # Priority vs Adaptive CP-SAT comparison benchmark
+    └── adaptive_benchmark_results.json      # Benchmark trajectory and comparison results
 ```
 
 ---

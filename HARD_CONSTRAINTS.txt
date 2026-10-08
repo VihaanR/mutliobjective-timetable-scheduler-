@@ -1,0 +1,310 @@
+================================================================================
+          MULTIOBJECTIVE TIMETABLE SCHEDULER - HARD CONSTRAINTS CATALOG
+================================================================================
+Repository: mutliobjective-timetable-scheduler-
+Institution: DJ Sanghvi College of Engineering (DJSCE) - CSE (Data Science)
+Framework: NEP 2020 / FYUP & Autonomous College Guidelines
+Generated: October 2026
+================================================================================
+
+1. OVERVIEW & DEFINITION
+--------------------------------------------------------------------------------
+Hard constraints represent non-negotiable physical, structural, and institutional
+invariants. 
+
+A timetable is legally valid (FEASIBLE) if and only if:
+    TOTAL HARD VIOLATIONS = 0
+
+Any timetable with even a single hard violation is rejected by the solver 
+comparator regardless of its soft cost score.
+
+
+================================================================================
+2. COMPLETE CATALOG OF HARD CONSTRAINTS
+================================================================================
+
+--------------------------------------------------------------------------------
+[HC-01] UNASSIGNED SESSION
+--------------------------------------------------------------------------------
+- Description: Every session requirement derived from the academic curriculum 
+  (lectures, tutorials, lab blocks, recesses) must be assigned to an active slot.
+- Rule: sum(x[req, slot, room] for all valid candidates) == 1
+- Failure Label: "unassigned_session"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 106)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 185-195)
+    • MIP:       engine/solvers/mip.py (Line 135)
+
+--------------------------------------------------------------------------------
+[HC-02] VALID TIME SLOT
+--------------------------------------------------------------------------------
+- Description: All assigned session slots must exist within the declared 
+  weekly time slot template.
+- Rule: slot_id in problem.time_slots
+- Failure Label: "invalid_time_slot"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 111)
+
+--------------------------------------------------------------------------------
+[HC-03] PROTECTED / PINNED SESSIONS
+--------------------------------------------------------------------------------
+- Description: Sessions marked with a fixed time slot or room (institutional 
+  mandates, fixed college assemblies, pre-booked slots) must not be moved.
+- Rule: If req.fixed_time_slot_id is set, assignment.time_slot_id == req.fixed_time_slot_id
+- Failure Label: "protected_block_moved"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 115)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 197-202)
+
+--------------------------------------------------------------------------------
+[HC-04] FIXED DAY PINNING
+--------------------------------------------------------------------------------
+- Description: When a session requirement is explicitly anchored to a day 
+  (e.g., each division's daily mid-day break), it must land strictly on that day.
+- Rule: slot.day == req.fixed_day
+- Failure Label: "session_on_wrong_day"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 120)
+
+--------------------------------------------------------------------------------
+[HC-05] BREAK OUTSIDE MID-DAY BAND
+--------------------------------------------------------------------------------
+- Description: Recess/break cannot be placed in the first two periods of the day 
+  (08:00-10:00 AM) or in the day's final period. It must represent a genuine 
+  mid-morning or lunch break.
+- Rule: break_period not in {0, 1} and break_period != last_period_of_day
+- Failure Label: "break_outside_midday_band"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 130)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 150-160)
+
+--------------------------------------------------------------------------------
+[HC-06] SESSION EXTENDS PAST DAY END
+--------------------------------------------------------------------------------
+- Description: Multi-hour sessions (such as 2-hour lab blocks) cannot cross past 
+  the closing period of the working day.
+- Rule: start_period + duration <= total_periods_in_day
+- Failure Label: "session_extends_past_day_end"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 55)
+
+--------------------------------------------------------------------------------
+[HC-07] BLOCKED / DISRUPTED SLOT EXCLUSION
+--------------------------------------------------------------------------------
+- Description: Under disruption management (rain emergencies, declared holidays, 
+  scheduled maintenance), teaching sessions cannot be placed into blocked windows.
+- Rule: for all sid in occupied_slots: sid not in problem.blocked_slot_ids
+- Failure Label: "scheduled_into_blocked_slot"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 141)
+    • Solvers:   Candidate filtering & engine/disruption.py
+
+--------------------------------------------------------------------------------
+[HC-08] VALID ROOM ASSIGNMENT
+--------------------------------------------------------------------------------
+- Description: Sessions requiring infrastructure must be assigned to an active, 
+  registered room.
+- Rule: assignment.room_id in problem.rooms
+- Failure Label: "invalid_room"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 147)
+
+--------------------------------------------------------------------------------
+[HC-09] CORRECT ROOM TYPE MATCHING
+--------------------------------------------------------------------------------
+- Description: Theory lectures and tutorials must be placed in classrooms; 
+  hands-on practical sessions must be placed in specialized laboratories.
+- Rule: room.room_type == req.room_type ("classroom" vs "lab")
+- Failure Label: "wrong_room_type"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 150)
+    • Solvers:   Enforced during candidate generation
+
+--------------------------------------------------------------------------------
+[HC-10] ROOM CAPACITY LIMIT
+--------------------------------------------------------------------------------
+- Description: The physical seating capacity of a room must be greater than or 
+  equal to the number of students attending the session.
+- Rule: room.capacity >= division_or_batch_student_count
+- Failure Label: "room_capacity_exceeded"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 154)
+
+--------------------------------------------------------------------------------
+[HC-11] ROOM NON-OVERLAP (NO DOUBLE-BOOKING)
+--------------------------------------------------------------------------------
+- Description: A room can host at most one teaching session at any given time slot.
+- Rule: sum(x[req, slot, room] for all req) <= 1  for every (room, slot)
+- Failure Label: "room_double_booked"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 161)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 210-235)
+    • MIP:       engine/solvers/mip.py (Lines 140-160)
+
+--------------------------------------------------------------------------------
+[HC-12] FACULTY NON-OVERLAP (NO DOUBLE-BOOKING)
+--------------------------------------------------------------------------------
+- Description: A faculty member cannot be scheduled to teach more than one 
+  session simultaneously.
+- Rule: sum(x[req, slot, room] for req.faculty == f) <= 1  for every (f, slot)
+- Failure Label: "faculty_double_booked"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 169)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 240-265)
+    • MIP:       engine/solvers/mip.py (Lines 165-185)
+
+--------------------------------------------------------------------------------
+[HC-13] FACULTY UNAVAILABLE SLOTS
+--------------------------------------------------------------------------------
+- Description: Faculty members cannot be assigned during declared leave periods, 
+  administrative duties, or unavailable hours.
+- Rule: for all sid in occupied_slots: sid not in faculty.unavailable_slots
+- Failure Label: "faculty_unavailable_slot_used"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 172)
+    • Solvers:   Filtered during candidate space generation
+
+--------------------------------------------------------------------------------
+[HC-14] DIVISION & BATCH NON-OVERLAP
+--------------------------------------------------------------------------------
+- Description: A student division cannot attend multiple sessions simultaneously. 
+  When a division is split into batches (e.g. B1, B2), a whole-division lecture 
+  cannot clash with a batch practical, and a batch cannot clash with itself.
+- Rule: 
+    • Whole division occupied => No batch session at the same time
+    • Batch occupied => No second session for the same batch
+- Failure Label: "division_double_booked"
+- Code References:
+    • Evaluator: engine/scoring.py (Lines 184-197)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 270-305)
+
+--------------------------------------------------------------------------------
+[HC-15] SUBJECT AT MOST ONCE PER DAY PER DIVISION
+--------------------------------------------------------------------------------
+- Description: A student division cannot have the same course taught multiple 
+  times on the same day (e.g., cannot schedule two separate Machine Learning 
+  lectures on Tuesday). Batch practical pairs are counted once as a single event.
+- Rule: occurrences(course, division, day) <= 1
+- Failure Label: "subject_more_than_once_per_day"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 233)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 365-380)
+
+--------------------------------------------------------------------------------
+[HC-16] PARALLEL LAB BATCH SIMULTANEITY
+--------------------------------------------------------------------------------
+- Description: When a division divides into lab batches (Batch 1 and Batch 2), 
+  both batches must start and end at the exact same time slots.
+- Rule: start_slot(batch_1) == start_slot(batch_2)
+- Failure Label: "batch_pair_not_simultaneous"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 237)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 310-330)
+
+--------------------------------------------------------------------------------
+[HC-17] PARALLEL LAB ROOM SEPARATION
+--------------------------------------------------------------------------------
+- Description: Simultaneous lab batches of the same division must be placed in 
+  different physical laboratory rooms.
+- Rule: room(batch_1) != room(batch_2)
+- Failure Label: "batch_pair_same_room"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 240)
+    • Solvers:   Parity-based candidate room pruning
+
+--------------------------------------------------------------------------------
+[HC-18] CROSS-DIVISION OPEN ELECTIVE SYNCHRONIZATION
+--------------------------------------------------------------------------------
+- Description: Multi-division synchronized courses (such as Institute Open 
+  Electives and Honours) must be scheduled simultaneously across all participating 
+  divisions to allow inter-departmental attendance.
+- Rule: start_slot(div_A) == start_slot(div_B) for all div in sync_group
+- Failure Label: "open_elective_slot_inconsistent_across_divisions"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 244)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 340-360)
+
+--------------------------------------------------------------------------------
+[HC-19] FACULTY DAILY WORKLOAD CAP
+--------------------------------------------------------------------------------
+- Description: A professor cannot be assigned more than 6 teaching hours on 
+  any single calendar day.
+- Rule: daily_teaching_hours(faculty, day) <= 6.0
+- Failure Label: "faculty_daily_workload_exceeded"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 248)
+
+--------------------------------------------------------------------------------
+[HC-20] FACULTY CONSECUTIVE TEACHING LIMIT
+--------------------------------------------------------------------------------
+- Description: Faculty members must not teach more than their maximum continuous 
+  teaching load without a break (default cap: 2 consecutive hours).
+- Rule: continuous_consecutive_periods(faculty) <= faculty.max_consecutive_sessions
+- Failure Label: "faculty_too_many_consecutive_sessions"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 257)
+
+--------------------------------------------------------------------------------
+[HC-21] FACULTY WEEKLY WORKLOAD CAP
+--------------------------------------------------------------------------------
+- Description: Total weekly hours assigned to a faculty member must not exceed 
+  their contractual maximum limit (default: 20 hours/week).
+- Rule: total_weekly_hours(faculty) <= faculty.max_load_hours_per_week
+- Failure Label: "faculty_weekly_load_exceeded"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 271)
+
+--------------------------------------------------------------------------------
+[HC-22] STUDENT DAILY LOAD RANGE (6 TO 8 HOURS)
+--------------------------------------------------------------------------------
+- Description: On every standard unrelaxed teaching day, a division's total 
+  academic hours (including labs and recess) must fall between 6 and 8 hours.
+- Rule: 6 <= division_daily_hours(div, day) <= 8
+- Failure Label: "division_daily_load_out_of_range"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 292)
+
+--------------------------------------------------------------------------------
+[HC-23] NO ALL-THEORY DAYS (MANDATORY LAB/SKILL COMPONENT)
+--------------------------------------------------------------------------------
+- Description: To ensure experiential learning under NEP 2020, each teaching 
+  day must contain at least one practical lab or skill-category session 
+  (for divisions whose curriculum credits contain enough practicals).
+- Rule: sum(practicals + skill_sessions on day) >= 1
+- Failure Label: "division_all_theory_day"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 294)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 470-490)
+
+--------------------------------------------------------------------------------
+[HC-24] MANDATORY 08:00 AM DAY START
+--------------------------------------------------------------------------------
+- Description: A student division's teaching day must commence at the first 
+  period of the institution (08:00 AM). Leading idle gaps or starting the day 
+  with a blank hole are prohibited.
+- Rule: period_0_occupied(division, day) == 1
+- Failure Label: "division_day_has_empty_first_slot"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 301)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 380-415)
+
+--------------------------------------------------------------------------------
+[HC-25] CONTINUOUS TEACHING LIMIT (MAX 4 HOURS BEFORE BREAK)
+--------------------------------------------------------------------------------
+- Description: Students cannot be subjected to more than 4 consecutive hours 
+  of non-break classes without an intervening recess/break period.
+- Rule: max_continuous_non_break_run(division, day) <= 4
+- Failure Label: "division_continuous_teaching_exceeds_limit"
+- Code References:
+    • Evaluator: engine/scoring.py (Line 317)
+    • CP-SAT:    engine/solvers/cpsat.py (Lines 430-460)
+
+================================================================================
+3. SUMMARY OF HARD VIOLATION IMPACT
+================================================================================
+* An infeasible timetable has hard_violations > 0.
+* In scoring comparison: 
+    better(A, B) -> A is chosen if hard_violations(A) < hard_violations(B).
+* If hard_violations(A) == hard_violations(B) == 0, then and only then is the 
+  secondary tie-breaker (soft_cost) evaluated.
+================================================================================

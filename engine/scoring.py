@@ -24,7 +24,7 @@ MAX_CONTINUOUS_TEACHING_PERIODS = 4
 SOFT_WEIGHTS = {
     "heavy_subject_run": 5.0,
     "teacher_workload_spread": 1.0,
-    "idle_gaps": 50.0,
+    "idle_gaps": 100.0,
     "earliest_latest_same_day": 3.0,
     "lab_not_before_final_slots": 4.0,
     "room_capacity_waste": 0.1,

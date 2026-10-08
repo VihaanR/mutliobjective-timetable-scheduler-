@@ -144,10 +144,12 @@ v:/Projects/IPD/mutliobjective-timetable-scheduler-/
 │   ├── algo_test.cc                         # Standalone C++ test for custom search algorithms
 │   └── NOTICE                               # Apache-2.0 license and attribution
 │
-└── research/                                # BENCHMARKING & EXPERIMENT HARNESS
-    ├── fork_benchmark.py                    # Multi-arm, multi-seed comparative benchmark script
-    ├── adaptive_cpsat_benchmark.py          # Priority vs Adaptive CP-SAT comparison benchmark
-    └── adaptive_benchmark_results.json      # Benchmark trajectory and comparison results
+├── research/                                # BENCHMARKING & EXPERIMENT HARNESS
+│   ├── fork_benchmark.py                    # Multi-arm, multi-seed comparative benchmark script
+│   ├── adaptive_cpsat_benchmark.py          # Priority vs Adaptive CP-SAT comparison benchmark
+│   └── adaptive_benchmark_results.json      # Benchmark trajectory and comparison results
+│
+└── ADAPTIVE_CPSAT.md                        # In-depth technical specification of Adaptive CP-SAT engine
 ```
 
 ---

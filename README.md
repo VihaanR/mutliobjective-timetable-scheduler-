@@ -18,6 +18,7 @@ The complete change is **9 files, 245 insertions, 2 modified lines, 0 deletions*
 - **[CHANGES_DONE.md](CHANGES_DONE.md)** — the full technical write-up: every code change with
   rationale, why parameters cannot express these features
   details, and the measured results.
+- **[ADAPTIVE_CPSAT.md](ADAPTIVE_CPSAT.md)** — in-depth technical specification and algorithmic formulation of the multi-objective Adaptive CP-SAT engine.
 
 ---
 
@@ -141,6 +142,7 @@ the fork at import and enables both features automatically.
 ├── research/               Benchmark harness and 20-seed result data
 ├── tests/                  pytest suite
 ├── data/                   Reference DJSCE datasets
+├── ADAPTIVE_CPSAT.md       Multi-objective Adaptive CP-SAT engine specification
 └── .github/workflows/      CI: builds fork + unpatched baseline wheels
 ```
 

@@ -527,10 +527,10 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         model.Add(day_range == max_day - min_day)
         workload_unscaled.append(day_range)
 
-    # Legacy baseline categories (retains exact multipliers and groupings)
+    # Calibrated baseline categories (prioritizes compact schedule and zero idle gaps)
     room_obj_terms = room_waste_unscaled
-    lab_obj_terms = [200 * v for v in lab_unscaled]
-    student_obj_terms = [15 * v for v in break_unscaled] + [GAP_WEIGHT * v for v in span_unscaled] + [25 * g for g in idle_gaps_unscaled]
+    lab_obj_terms = [10 * v for v in lab_unscaled]
+    student_obj_terms = [5 * v for v in break_unscaled] + [20 * v for v in span_unscaled] + [100 * g for g in idle_gaps_unscaled]
     faculty_obj_terms = [FACULTY_BALANCE_WEIGHT * v for v in workload_unscaled]
 
     objective_categories = {
@@ -691,11 +691,11 @@ class CPSATSolver(SolverBase):
             else:
                 remaining_iters = max(1, max_iters - iter_idx + 1)
                 if incumbent_solution is None:
-                    # Cold start: Give the solver full remaining budget to establish a feasible incumbent.
-                    iter_time_limit = remaining_budget_s
-                    stop_on_first = (max_iters > 1)
+                    # Allocate half the budget (or at least 30s) to establish a high-quality incumbent
+                    iter_time_limit = remaining_budget_s if max_iters <= 1 else max(30.0, remaining_budget_s / 2.0)
+                    stop_on_first = False
                 else:
-                    iter_time_limit = min(remaining_budget_s, max(5.0, remaining_budget_s / remaining_iters))
+                    iter_time_limit = min(remaining_budget_s, max(15.0, remaining_budget_s / remaining_iters))
                     stop_on_first = False
 
             if incumbent_solution is None:

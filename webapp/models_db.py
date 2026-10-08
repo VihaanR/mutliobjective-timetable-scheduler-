@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
+from pydantic import field_validator
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
@@ -101,6 +102,24 @@ class FacultyBase(SQLModel):
     max_consecutive_sessions: int = 2
     email: Optional[str] = None     # login identity (Auth, design.md §11) - nullable until a
                                      # teacher sets credentials for this row
+    is_visiting: bool = False
+    visiting_days: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    visiting_start_time: Optional[str] = None
+    visiting_end_time: Optional[str] = None
+
+    @field_validator("visiting_days", mode="before")
+    @classmethod
+    def _coerce_visiting_days(cls, v):
+        if v is None:
+            return []
+        return v
+
+    @field_validator("is_visiting", mode="before")
+    @classmethod
+    def _coerce_is_visiting(cls, v):
+        if v is None:
+            return False
+        return bool(v)
 
 
 class Faculty(FacultyBase, table=True):
@@ -125,6 +144,10 @@ class FacultyUpdate(SQLModel):
     unavailable_slot_ids: Optional[list[int]] = None
     email: Optional[str] = None
     password: Optional[str] = None   # if provided, re-hash and replace; omitted = unchanged
+    is_visiting: Optional[bool] = None
+    visiting_days: Optional[list[int]] = None
+    visiting_start_time: Optional[str] = None
+    visiting_end_time: Optional[str] = None
 
 
 class FacultyPublic(FacultyBase):
@@ -253,10 +276,35 @@ class TimetableRun(SQLModel, table=True):
     solution: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     grids: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     stage_reports: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    num_candidates: int = 1
+    candidate_solutions: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    judge_reports: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    selected_candidate_idx: int = 0
     hard: Optional[int] = None
     soft: Optional[float] = None
     wall_clock: Optional[float] = None    # total solve wall-clock seconds (pipeline total, or solver's)
     error: Optional[str] = None
+
+    @field_validator("candidate_solutions", "judge_reports", mode="before")
+    @classmethod
+    def _coerce_run_lists(cls, v):
+        if v is None:
+            return []
+        return v
+
+    @field_validator("num_candidates", mode="before")
+    @classmethod
+    def _coerce_num_candidates(cls, v):
+        if v is None:
+            return 1
+        return v
+
+    @field_validator("selected_candidate_idx", mode="before")
+    @classmethod
+    def _coerce_selected_candidate_idx(cls, v):
+        if v is None:
+            return 0
+        return v
 
 
 # --------------------------------------------------------------------------- term (P3)

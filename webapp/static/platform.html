@@ -208,6 +208,10 @@
           <option value="adaptive">Adaptive CP-SAT (Feedback Loop)</option>
         </select>
       </div>
+      <div class="control" id="numCandidatesWrap">
+        <label>Candidates (N)</label>
+        <input type="number" id="numCandidates" value="3" min="1" max="10" step="1" title="Generate N candidate timetables to judge and compare">
+      </div>
       <div class="control">
         <label>Time Limit (s)</label>
         <input type="number" id="timeLimit" value="180" min="5" max="1200" step="10">
@@ -220,13 +224,64 @@
     <p class="notes" id="genNote" style="margin-top: 10px;">CP-SAT solves all cross-year shared faculty and lab constraints simultaneously with zero clash and minimal student gaps.</p>
     <div class="status-line" id="genStatus"></div>
 
-    <!-- Generate Timetable Scope Selection Modal -->
+    <!-- Generate Timetable Scope & Pre-solve Configuration Modal -->
     <div id="genScopeModal" class="scope-modal-backdrop" style="display:none;">
-      <div class="scope-card">
+      <div class="scope-card" style="max-width: 680px; max-height: 90vh; overflow-y: auto;">
         <div class="scope-header">
-          <h3>⚡ Generate Timetable — Choose Scope</h3>
-          <p>Select which academic semester datasets to solve with CP-SAT (cross-year shared faculty &amp; zero clash):</p>
+          <h3>⚡ Generate Timetables &amp; AQWI Judge Configuration</h3>
+          <p>Configure candidate generation ($N$), visiting faculty constraints (high priority), and solve scope:</p>
         </div>
+
+        <!-- Pre-solve Setting: Number of Timetables N -->
+        <div style="background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:16px;">
+          <div>
+            <div style="font-weight:700; font-size:13.5px; color:#0f172a; display:flex; align-items:center; gap:6px;">
+              <span>🎲 Number of Candidate Timetables to Generate (N)</span>
+              <span class="badge" style="background:#0284c7; color:#fff; font-size:10.5px; padding:2px 7px; border-radius:10px;">AQWI Ranked</span>
+            </div>
+            <div style="font-size:12px; color:var(--muted); margin-top:2px;">
+              Generates $N$ distinct candidate timetables with diversified search seeds and ranks them using the 7-Point Academic Quality &amp; Welfare Index (AQWI).
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <label for="modalNumCandidates" style="font-size:12px; font-weight:700; color:#475569;">N =</label>
+            <input type="number" id="modalNumCandidates" min="1" max="10" value="3" style="width:65px; padding:6px 10px; border-radius:6px; border:1.5px solid #cbd5e1; font-weight:700; font-size:14px; text-align:center; color:#003877;">
+          </div>
+        </div>
+
+        <!-- Pre-solve Setting: Visiting Faculty & Higher Sequential Priority -->
+        <div style="background:#f0f9ff; border:1.5px solid #bae6fd; border-radius:10px; padding:14px 16px; margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="font-weight:700; font-size:13.5px; color:#0369a1; display:flex; align-items:center; gap:6px;">
+              <span>👨‍🏫 Visiting Faculty Configuration</span>
+            </div>
+            <span style="font-size:11px; font-weight:800; background:#0284c7; color:#fff; padding:3px 9px; border-radius:12px; letter-spacing:0.3px;">
+              ⚡ Higher Sequential Priority
+            </span>
+          </div>
+          <p style="font-size:12px; color:#0c4a6e; margin:0 0 10px 0; line-height:1.45;">
+            Visiting faculty are strictly scheduled with <b>higher sequential priority</b> (allocated foremost) so their narrow availability windows (days &amp; work hours) are locked before flexible faculty take slots.
+          </p>
+
+          <div id="visitingFacultyContainer" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; margin-bottom:10px; padding-right:4px;">
+            <!-- Rendered list of visiting faculty -->
+          </div>
+
+          <div style="display:flex; gap:8px; align-items:center; background:#fff; padding:8px 10px; border-radius:8px; border:1px solid #bae6fd;">
+            <select id="modalAddVisitingSelect" style="flex:1; padding:6px 8px; border-radius:6px; border:1px solid #cbd5e1; font-size:12px; font-weight:600; color:#334155;">
+              <option value="">+ Designate a faculty member as Visiting...</option>
+            </select>
+            <button type="button" id="modalAddVisitingBtn" class="secondary" style="padding:6px 14px; font-size:12px; border-radius:6px; font-weight:700; cursor:pointer;">
+              Add Visiting
+            </button>
+          </div>
+        </div>
+
+        <div class="scope-header" style="border-top:1px solid var(--line); padding-top:12px; margin-bottom:12px;">
+          <h4 style="margin:0 0 4px; font-size:14px; color:#334155;">Select Academic Scope to Solve</h4>
+          <p style="margin:0; font-size:12px; color:var(--muted);">Simultaneously solved across departments with zero room &amp; faculty clash:</p>
+        </div>
+
         <div class="scope-options-grid">
           <div class="scope-option highlight-opt" id="genOptOddSem">
             <div class="scope-opt-info">
@@ -272,10 +327,29 @@
 
   <section class="panel-section" id="resultSection">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h2 style="margin:0;">5. Single Timetable Result</h2>
+      <h2 style="margin:0;">5. Generated Timetable Results</h2>
       <span id="activeRunBadge" style="font-size:13px; font-weight:600; color:var(--muted);"></span>
     </div>
     <div class="readiness-banner not-ready" id="solveWarning" style="display:none"></div>
+
+    <!-- AQWI Judge Leaderboard & Candidate Selection -->
+    <div id="judgeSection" style="display:none; margin-bottom: 20px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 18px 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.03);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <h3 style="margin: 0; font-size: 16px; color: #0f172a;">⚖️ Academic Quality &amp; Welfare Index (AQWI) Leaderboard</h3>
+            <span class="badge" style="background:#2563eb; color:#fff; font-size:11px; padding:2px 8px; border-radius:12px; font-weight:700;">7-Criteria Judge</span>
+          </div>
+          <p style="margin: 4px 0 0; font-size: 12.5px; color: #64748b;">
+            Comprehensive academic score evaluating student day span, idle gaps, lab/theory spread, and faculty welfare.
+          </p>
+        </div>
+        <div id="candidateSwitcherWrap" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+      </div>
+      <div id="candidateCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px;"></div>
+      <div id="judgeBreakdownDetails" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;"></div>
+    </div>
+
     <div class="summary" id="summary" style="display:none">
       <div class="stat"><span class="stat-val" id="statSolver">—</span><span class="stat-lbl">solver</span></div>
       <div class="stat"><span class="stat-val" id="statStatus">—</span><span class="stat-lbl">status</span></div>

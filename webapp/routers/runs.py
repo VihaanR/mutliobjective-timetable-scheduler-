@@ -14,13 +14,13 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import Session, select
 from starlette.background import BackgroundTask
 
 from engine.disruption import affected_slots_for_day, replan
 from engine.export import export_pdf, export_xlsx
-from engine.io_json import problem_from_dict, problem_to_dict, solution_from_dict
+from engine.io_json import problem_from_dict, problem_to_dict, solution_from_dict, solution_to_dict
 from engine.models import Assignment, Solution
 from engine.pipeline import PipelineConfig, run_pipeline
 from engine.scoring import score
@@ -30,7 +30,7 @@ from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.grid_meta import annotate_grids
 from webapp.jobs import has_active_run, run_generation
-from webapp.models_db import Branch, TimetableRun, ManualEdit
+from webapp.models_db import Branch, Faculty, TimetableRun, ManualEdit
 from webapp.problem_builder import build_division_meta, readiness, spans_multiple_branches
 
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -41,12 +41,44 @@ PDF_MEDIA_TYPE = "application/pdf"
 router = APIRouter(prefix="/api", tags=["runs"])
 
 
+_DAY_MAP = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4}
+
+
+class VisitingFacultyOverride(BaseModel):
+    id: Optional[int] = None
+    code: Optional[str] = None
+    name: Optional[str] = None
+    is_visiting: bool = True
+    visiting_days: list[int] = []
+    visiting_start_time: str = ""
+    visiting_end_time: str = ""
+
+    @field_validator("visiting_days", mode="before")
+    @classmethod
+    def _coerce_days(cls, v):
+        if not v:
+            return []
+        res = []
+        for item in v:
+            if isinstance(item, int):
+                res.append(item)
+            elif isinstance(item, str):
+                dl = item.lower().strip()
+                if dl in _DAY_MAP:
+                    res.append(_DAY_MAP[dl])
+                elif dl.isdigit():
+                    res.append(int(dl))
+        return res
+
+
 class GenerateRequest(BaseModel):
     solver: str = "cpsat"
     time_limit: float = 30.0
     label: str = ""
     branch_ids: list[int] | None = None
     optimization_mode: str = "baseline"
+    num_candidates: int = 1
+    visiting_faculty_overrides: list[VisitingFacultyOverride] | None = None
 
 
 class CompareRequest(BaseModel):
@@ -71,6 +103,22 @@ def generate(
 
     if body.solver != "pipeline" and body.solver not in SOLVERS:
         raise HTTPException(status_code=400, detail=f"unknown solver {body.solver!r}")
+
+    # Persist any visiting faculty updates immediately so problem builder reflects them
+    if body.visiting_faculty_overrides:
+        for ov in body.visiting_faculty_overrides:
+            fac = None
+            if ov.id is not None:
+                fac = session.get(Faculty, ov.id)
+            elif ov.code:
+                fac = session.exec(select(Faculty).where(Faculty.code == ov.code)).first()
+            if fac:
+                fac.is_visiting = ov.is_visiting
+                fac.visiting_days = ov.visiting_days
+                fac.visiting_start_time = ov.visiting_start_time
+                fac.visiting_end_time = ov.visiting_end_time
+                session.add(fac)
+        session.commit()
 
     # A selection spanning several branches must use branch-qualified engine ids, or the years'
     # identically-named divisions (every year has a D1) collapse into one. Decided from the DB, not
@@ -97,6 +145,8 @@ def generate(
         problem_snapshot=problem_to_dict(problem),
         branch_ids=list(covered),
         division_meta=div_meta,
+        num_candidates=max(1, body.num_candidates),
+        selected_candidate_idx=0,
     )
     session.add(run)
     session.commit()
@@ -215,9 +265,61 @@ def get_run(run_id: int, session: Session = Depends(get_session), _=Depends(requ
         "wall_clock": run.wall_clock,
         "grids": run.grids,
         "stage_reports": run.stage_reports,
+        "num_candidates": run.num_candidates,
+        "candidate_solutions": run.candidate_solutions or [],
+        "judge_reports": run.judge_reports or [],
+        "selected_candidate_idx": run.selected_candidate_idx,
         "error": run.error,
         "created_at": (run.created_at.isoformat() + "Z") if run.created_at else None,
         "branch_ids": run.branch_ids or [],
+    }
+
+
+class SelectCandidateRequest(BaseModel):
+    candidate_idx: int
+
+
+@router.post("/runs/{run_id}/select-candidate")
+def select_candidate(
+    run_id: int,
+    body: SelectCandidateRequest,
+    session: Session = Depends(get_session),
+    _=Depends(require_faculty),
+):
+    run = session.get(TimetableRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    if run.status != "done":
+        raise HTTPException(status_code=400, detail="run is not completed")
+
+    candidates = run.candidate_solutions or []
+    if not (0 <= body.candidate_idx < len(candidates)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"candidate_idx {body.candidate_idx} out of range (0..{len(candidates)-1})",
+        )
+
+    problem = problem_from_dict(run.problem_snapshot)
+    sol_dict = candidates[body.candidate_idx]
+    sol = solution_from_dict(sol_dict)
+    grids = annotate_grids(solution_to_grids(sol, problem), run.division_meta or {})
+    sc = score(sol, problem)
+
+    run.selected_candidate_idx = body.candidate_idx
+    run.solution = sol_dict
+    run.grids = grids
+    run.hard = sc.hard_violations
+    run.soft = sc.soft_cost
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    return {
+        "status": "ok",
+        "selected_candidate_idx": run.selected_candidate_idx,
+        "hard": run.hard,
+        "soft": run.soft,
+        "grids": run.grids,
     }
 
 

@@ -68,6 +68,10 @@ class Faculty:
     max_consecutive_sessions: int = 2
     unavailable_slots: frozenset[int] = field(default_factory=frozenset)
     preferred_slots: frozenset[int] = field(default_factory=frozenset)
+    is_visiting: bool = False
+    visiting_days: tuple[int, ...] = ()             # e.g. (1, 3) for Tue, Thu
+    visiting_start_time: str = ""                   # e.g. "10:00"
+    visiting_end_time: str = ""                     # e.g. "14:00"
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +146,8 @@ class SessionRequirement:
     sync_group_id: str | None = None       # sessions sharing this id must get the same slot (e.g. cross-division OE)
     is_break: bool = False                 # if True, must land in the mid-day band (not first two / last)
     is_absent: bool = False                # if True, session is absent/cancelled
+    is_visiting_faculty: bool = False       # if True, taught by visiting faculty (top sequential priority)
     fixed_day: int | None = None           # if set, session must be scheduled on exactly this day
-                                            # (used to pin each division's daily break to its own day)
     fixed_time_slot_id: int | None = None  # if set, solver must use exactly this slot (protected blocks)
     room_type: str = "classroom"
 
@@ -263,7 +267,14 @@ def expand_requirements(problem: ProblemInstance) -> list[SessionRequirement]:
     assigns a (time_slot, room) to. Order is deterministic (division, then course, then session
     index) so GA gene positions are stable across runs."""
     courses = problem.course_by_code()
+    faculty_dict = problem.faculty_by_id()
     requirements: list[SessionRequirement] = []
+
+    def _is_visiting(fid: str | None) -> bool:
+        if not fid:
+            return False
+        f = faculty_dict.get(fid)
+        return bool(f and f.is_visiting)
 
     for division in sorted(problem.divisions, key=lambda d: d.id):
         for day in range(problem.days_per_week):
@@ -302,6 +313,7 @@ def expand_requirements(problem: ProblemInstance) -> list[SessionRequirement]:
                     session_type=SessionType.THEORY,
                     duration_slots=1,
                     sync_group_id=_sync(i),
+                    is_visiting_faculty=_is_visiting(faculty_id),
                     room_type="classroom",
                 ))
 
@@ -314,21 +326,24 @@ def expand_requirements(problem: ProblemInstance) -> list[SessionRequirement]:
                     session_type=SessionType.TUTORIAL,
                     duration_slots=1,
                     sync_group_id=_sync(i),
+                    is_visiting_faculty=_is_visiting(faculty_id),
                     room_type="classroom",
                 ))
 
             for i in range(course.practical_sessions_per_week):
                 batch_group_id = f"{division.id}_{code}_PR_{i}"
                 for batch in division.batch_pair():
+                    b_faculty_id = division.faculty_for(code, batch)
                     requirements.append(SessionRequirement(
                         id=f"{division.id}_{code}_PR_{i}_{batch}",
                         division_id=division.id,
                         course_code=code,
-                        faculty_id=division.faculty_for(code, batch),
+                        faculty_id=b_faculty_id,
                         session_type=SessionType.PRACTICAL,
                         duration_slots=2,
                         batch_id=batch,
                         batch_group_id=batch_group_id,
+                        is_visiting_faculty=_is_visiting(b_faculty_id),
                         room_type="lab",
                     ))
 

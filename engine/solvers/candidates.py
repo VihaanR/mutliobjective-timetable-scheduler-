@@ -108,8 +108,19 @@ def build_candidates(problem: ProblemInstance,
                     continue
                 if req.faculty_id:
                     fac = faculty_by_id.get(req.faculty_id)
-                    if fac and any(sid in fac.unavailable_slots for sid in occ_ids):
-                        continue
+                    if fac:
+                        if any(sid in fac.unavailable_slots for sid in occ_ids):
+                            continue
+                        if fac.is_visiting:
+                            # Visiting faculty hard window filtering
+                            if fac.visiting_days and day not in fac.visiting_days:
+                                continue
+                            if fac.visiting_start_time and ts.start < fac.visiting_start_time:
+                                continue
+                            if fac.visiting_end_time:
+                                last_slot = day_slots[start_idx + req.duration_slots - 1]
+                                if last_slot.end > fac.visiting_end_time:
+                                    continue
                 for room_id in room_options:
                     if room_id != NO_ROOM:
                         room = rooms_by_id[room_id]

@@ -53,6 +53,16 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "timetablerun": {
         "branch_ids": "JSON",
         "division_meta": "JSON",
+        "num_candidates": "INTEGER DEFAULT 1",
+        "candidate_solutions": "JSON",
+        "judge_reports": "JSON",
+        "selected_candidate_idx": "INTEGER DEFAULT 0",
+    },
+    "faculty": {
+        "is_visiting": "BOOLEAN DEFAULT 0",
+        "visiting_days": "JSON",
+        "visiting_start_time": "VARCHAR DEFAULT ''",
+        "visiting_end_time": "VARCHAR DEFAULT ''",
     },
 }
 
@@ -77,6 +87,15 @@ def _apply_additive_migrations(engine) -> list[str]:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
                 applied.append(f"{table}.{column}")
+
+        if "faculty" in existing_tables:
+            conn.execute(text("UPDATE faculty SET is_visiting = 0 WHERE is_visiting IS NULL"))
+            conn.execute(text("UPDATE faculty SET visiting_days = '[]' WHERE visiting_days IS NULL"))
+        if "timetablerun" in existing_tables:
+            conn.execute(text("UPDATE timetablerun SET num_candidates = 1 WHERE num_candidates IS NULL"))
+            conn.execute(text("UPDATE timetablerun SET selected_candidate_idx = 0 WHERE selected_candidate_idx IS NULL"))
+            conn.execute(text("UPDATE timetablerun SET candidate_solutions = '[]' WHERE candidate_solutions IS NULL"))
+            conn.execute(text("UPDATE timetablerun SET judge_reports = '[]' WHERE judge_reports IS NULL"))
     return applied
 
 

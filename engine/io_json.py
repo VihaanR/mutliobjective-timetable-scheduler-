@@ -24,9 +24,21 @@ def _faculty_value_from_json(value):
 def problem_from_dict(data: dict) -> ProblemInstance:
     time_slots = [TimeSlot(**t) for t in data["time_slots"]]
     rooms = [Room(**r) for r in data["rooms"]]
-    faculty = [Faculty(**{**f, "unavailable_slots": frozenset(f.get("unavailable_slots", [])),
-                           "preferred_slots": frozenset(f.get("preferred_slots", []))})
-               for f in data["faculty"]]
+    faculty = [
+        Faculty(
+            id=f["id"],
+            name=f["name"],
+            max_load_hours_per_week=f.get("max_load_hours_per_week", 20),
+            max_consecutive_sessions=f.get("max_consecutive_sessions", 2),
+            unavailable_slots=frozenset(f.get("unavailable_slots", [])),
+            preferred_slots=frozenset(f.get("preferred_slots", [])),
+            is_visiting=bool(f.get("is_visiting", False)),
+            visiting_days=tuple(f.get("visiting_days", ())),
+            visiting_start_time=f.get("visiting_start_time", ""),
+            visiting_end_time=f.get("visiting_end_time", ""),
+        )
+        for f in data["faculty"]
+    ]
     courses = [Course(**{**c, "category": CourseCategory(c["category"])}) for c in data["courses"]]
     divisions = [
         Division(
@@ -87,6 +99,10 @@ def problem_to_dict(problem: ProblemInstance) -> dict:
                 "max_consecutive_sessions": f.max_consecutive_sessions,
                 "unavailable_slots": sorted(f.unavailable_slots),
                 "preferred_slots": sorted(f.preferred_slots),
+                "is_visiting": f.is_visiting,
+                "visiting_days": list(f.visiting_days),
+                "visiting_start_time": f.visiting_start_time,
+                "visiting_end_time": f.visiting_end_time,
             }
             for f in problem.faculty
         ],

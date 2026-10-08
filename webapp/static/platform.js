@@ -37,6 +37,13 @@ on("semSelect", "change", () => { renderResolvedBranch(); checkReadiness(); });
 
 on("generateTimetableBtn", "click", openGenScopeModal);
 on("closeGenScopeModalBtn", "click", closeGenScopeModal);
+on("modalAddVisitingBtn", "click", addVisitingFacultyFromSelect);
+on("numCandidates", "input", () => {
+  if ($("modalNumCandidates") && $("numCandidates")) $("modalNumCandidates").value = $("numCandidates").value;
+});
+on("modalNumCandidates", "input", () => {
+  if ($("numCandidates") && $("modalNumCandidates")) $("numCandidates").value = $("modalNumCandidates").value;
+});
 on("genOptOddSem", "click", () => { closeGenScopeModal(); generate("odd"); });
 on("genOptEvenSem", "click", () => { closeGenScopeModal(); generate("even"); });
 on("genSpecificBtn", "click", () => {
@@ -251,10 +258,138 @@ async function checkReadiness() {
   }
 }
 
-// ---------------------------------------------------------------- 4. generate timetable modal & runner
+// ---------------------------------------------------------------- 4. generate timetable modal, visiting faculty & runner
+let visitingFacultyList = [];
+let allFacultyList = [];
+
+async function loadVisitingFacultyModal() {
+  try {
+    const res = await fetch("/api/faculty");
+    if (!res.ok) return;
+    allFacultyList = await res.json();
+
+    if (visitingFacultyList.length === 0) {
+      visitingFacultyList = allFacultyList
+        .filter(f => f.is_visiting)
+        .map(f => ({
+          id: f.id,
+          code: f.code,
+          name: f.name,
+          is_visiting: true,
+          visiting_days: f.visiting_days && f.visiting_days.length > 0 ? f.visiting_days : [0, 1, 2, 3, 4],
+          visiting_start_time: f.visiting_start_time || "09:00",
+          visiting_end_time: f.visiting_end_time || "14:00",
+        }));
+    }
+    renderVisitingFacultyList();
+    updateVisitingSelectOptions();
+  } catch (e) {
+    console.error("Error loading faculty for modal:", e);
+  }
+}
+
+function updateVisitingSelectOptions() {
+  const sel = $("modalAddVisitingSelect");
+  if (!sel) return;
+  const existingIds = new Set(visitingFacultyList.map(f => f.id));
+  const available = allFacultyList.filter(f => !existingIds.has(f.id));
+  sel.innerHTML = `<option value="">+ Designate a faculty member as Visiting...</option>` +
+    available.map(f => `<option value="${f.id}">${f.name} (${f.code})</option>`).join("");
+}
+
+function renderVisitingFacultyList() {
+  const container = $("visitingFacultyContainer");
+  if (!container) return;
+  if (visitingFacultyList.length === 0) {
+    container.innerHTML = `<div style="font-size:12px; color:#64748b; font-style:italic; padding:6px 0;">No visiting faculty designated yet. Add any faculty below to lock in their working days &amp; hours with highest priority.</div>`;
+    return;
+  }
+
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  container.innerHTML = visitingFacultyList.map((f, idx) => {
+    const daysChecks = dayNames.map((dName, dIdx) => {
+      const checked = (f.visiting_days || []).includes(dIdx) ? "checked" : "";
+      return `
+        <label style="font-size:11px; display:inline-flex; align-items:center; gap:2px; font-weight:600; cursor:pointer;">
+          <input type="checkbox" ${checked} onchange="window.toggleVisitingDay(${idx}, ${dIdx}, this.checked)"> ${dName}
+        </label>
+      `;
+    }).join(" ");
+
+    return `
+      <div style="background:#fff; border:1px solid #bae6fd; border-radius:8px; padding:8px 10px; display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <b style="font-size:12.5px; color:#0369a1;">${f.name}</b> <span style="font-size:11.5px; color:#64748b;">(${f.code})</span>
+            <span style="font-size:10px; background:#e0f2fe; color:#0284c7; padding:2px 6px; border-radius:10px; font-weight:700; margin-left:4px;">PRIORITY 1</span>
+          </div>
+          <button type="button" style="background:transparent; border:none; color:#ef4444; font-size:11.5px; cursor:pointer; font-weight:700;" onclick="window.removeVisitingFaculty(${idx})">✕ Remove</button>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; font-size:11.5px;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="color:#475569; font-weight:600;">Days:</span>
+            ${daysChecks}
+          </div>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <span style="color:#475569; font-weight:600;">Hours:</span>
+            <input type="text" value="${f.visiting_start_time || '09:00'}" style="width:50px; padding:2px 4px; font-size:11px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;" onchange="window.updateVisitingTime(${idx}, 'visiting_start_time', this.value)" placeholder="HH:MM">
+            <span>to</span>
+            <input type="text" value="${f.visiting_end_time || '14:00'}" style="width:50px; padding:2px 4px; font-size:11px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;" onchange="window.updateVisitingTime(${idx}, 'visiting_end_time', this.value)" placeholder="HH:MM">
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function addVisitingFacultyFromSelect() {
+  const sel = $("modalAddVisitingSelect");
+  if (!sel || !sel.value) return;
+  const facId = parseInt(sel.value);
+  const fac = allFacultyList.find(f => f.id === facId);
+  if (!fac) return;
+  visitingFacultyList.push({
+    id: fac.id,
+    code: fac.code,
+    name: fac.name,
+    is_visiting: true,
+    visiting_days: fac.visiting_days && fac.visiting_days.length > 0 ? fac.visiting_days : [0, 1, 2, 3, 4],
+    visiting_start_time: fac.visiting_start_time || "09:00",
+    visiting_end_time: fac.visiting_end_time || "14:00",
+  });
+  renderVisitingFacultyList();
+  updateVisitingSelectOptions();
+}
+
+window.removeVisitingFaculty = function(idx) {
+  visitingFacultyList.splice(idx, 1);
+  renderVisitingFacultyList();
+  updateVisitingSelectOptions();
+};
+
+window.toggleVisitingDay = function(facIdx, dayIdx, checked) {
+  const f = visitingFacultyList[facIdx];
+  if (!f) return;
+  f.visiting_days = f.visiting_days || [];
+  if (checked) {
+    if (!f.visiting_days.includes(dayIdx)) f.visiting_days.push(dayIdx);
+  } else {
+    f.visiting_days = f.visiting_days.filter(d => d !== dayIdx);
+  }
+};
+
+window.updateVisitingTime = function(facIdx, field, val) {
+  const f = visitingFacultyList[facIdx];
+  if (f) f[field] = val.trim();
+};
+
 function openGenScopeModal() {
   const modal = $("genScopeModal");
   if (!modal) return;
+  if ($("modalNumCandidates") && $("numCandidates")) {
+    $("modalNumCandidates").value = $("numCandidates").value || 3;
+  }
+  loadVisitingFacultyModal();
   const sel = $("genSpecificBranchSelect");
   if (sel) {
     if (allBranches && allBranches.length > 0) {
@@ -331,18 +466,33 @@ async function generate(mode = "selected", specificBranchId = null) {
     label = `All Loaded (${allBranches.length} classes)`;
   }
 
+  const numCandEl = $("modalNumCandidates") || $("numCandidates");
+  const numCandidates = parseInt(numCandEl ? numCandEl.value : "1") || 1;
+
+  const visitingOverrides = visitingFacultyList.map(f => ({
+    id: f.id,
+    code: f.code,
+    name: f.name,
+    is_visiting: true,
+    visiting_days: f.visiting_days || [0, 1, 2, 3, 4],
+    visiting_start_time: f.visiting_start_time || "09:00",
+    visiting_end_time: f.visiting_end_time || "14:00",
+  }));
+
   const payload = {
     solver: $("solver").value,
     optimization_mode: $("optimizationMode") ? $("optimizationMode").value : "baseline",
     time_limit: parseFloat($("timeLimit").value) || 180,
     label,
     branch_ids,
+    num_candidates: numCandidates,
+    visiting_faculty_overrides: visitingOverrides,
   };
 
   if (stopBtn) stopBtn.style.display = "inline-flex";
 
   statusEl.className = "status-line active-gen";
-  statusEl.innerHTML = `<div class="gen-spinner"></div> <span>Generating timetable for <b>${label}</b> (${payload.solver}). Solving simultaneous constraints…</span>`;
+  statusEl.innerHTML = `<div class="gen-spinner"></div> <span>Generating <b>${numCandidates}</b> candidate timetable(s) for <b>${label}</b> (${payload.solver}). Solving simultaneous constraints…</span>`;
 
   try {
     const res = await fetch("/api/runs", {
@@ -413,6 +563,7 @@ function pollRun(runId, label) {
         if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${label}</b> (${run.solver})`;
         renderSummary(run);
         renderStages(run.stage_reports);
+        renderJudgeLeaderboard(run);
         currentGrids = run.grids;
         originalGrids = run.grids;
         movedIds = new Set();
@@ -441,6 +592,131 @@ function pollRun(runId, label) {
       if (stopBtn) stopBtn.style.display = "none";
     });
 }
+
+// ---------------------------------------------------------------- AQWI Judge Leaderboard
+function renderJudgeLeaderboard(run) {
+  const judgeSection = $("judgeSection");
+  if (!judgeSection) return;
+  const reports = run.judge_reports || [];
+  if (reports.length === 0) {
+    judgeSection.style.display = "none";
+    return;
+  }
+  judgeSection.style.display = "block";
+
+  const selectedIdx = run.selected_candidate_idx || 0;
+  const cardsContainer = $("candidateCardsContainer");
+  const switcherWrap = $("candidateSwitcherWrap");
+
+  if (switcherWrap) {
+    switcherWrap.innerHTML = reports.map((rep, idx) => `
+      <button type="button" class="tab ${idx === selectedIdx ? 'active' : ''}" style="padding:4px 10px; font-size:12px; font-weight:700; border-radius:6px;" onclick="window.selectCandidateTimetable(${run.id}, ${idx})">
+        Candidate #${idx + 1} (${rep.quality_score}%)
+      </button>
+    `).join("");
+  }
+
+  if (cardsContainer) {
+    cardsContainer.innerHTML = reports.map((rep, idx) => {
+      const isSelected = idx === selectedIdx;
+      const isTop = rep.rank === 1;
+      const scoreColor = rep.quality_score >= 90 ? "#16a34a" : (rep.quality_score >= 80 ? "#2563eb" : "#d97706");
+      return `
+        <div style="background:#fff; border:2px solid ${isSelected ? '#2563eb' : '#e2e8f0'}; border-radius:10px; padding:12px 14px; position:relative; cursor:pointer; transition:all 0.2s ease; box-shadow:${isSelected ? '0 4px 12px rgba(37,99,235,0.15)' : 'none'};" onclick="window.selectCandidateTimetable(${run.id}, ${idx})">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span style="font-weight:800; font-size:13px; color:#0f172a;">Candidate #${idx + 1}</span>
+              ${isTop ? '<span style="background:#16a34a; color:#fff; font-size:10px; font-weight:800; padding:2px 6px; border-radius:10px;">★ Rank #1</span>' : `<span style="background:#f1f5f9; color:#475569; font-size:10px; font-weight:700; padding:2px 6px; border-radius:10px;">Rank #${rep.rank}</span>`}
+            </div>
+            ${isSelected ? '<span style="font-size:11px; font-weight:700; color:#2563eb; background:#eff6ff; padding:2px 7px; border-radius:10px;">Active Grid</span>' : '<button type="button" style="font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; border:1px solid #cbd5e1; background:#f8fafc; cursor:pointer;">Select</button>'}
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+            <div>
+              <div style="font-size:11px; color:#64748b; font-weight:600;">AQWI Quality Score</div>
+              <div style="font-size:22px; font-weight:800; color:${scoreColor}; line-height:1.1;">
+                ${rep.quality_score}<span style="font-size:13px; font-weight:700;">%</span>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px; color:#64748b; font-weight:600;">Penalty Cost</div>
+              <div style="font-size:14px; font-weight:700; color:#334155;">${rep.total_penalty.toFixed(1)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  const detailsContainer = $("judgeBreakdownDetails");
+  if (detailsContainer && reports[selectedIdx]) {
+    const activeRep = reports[selectedIdx];
+    const critRows = Object.entries(activeRep.criteria || {}).map(([key, crit], cIdx) => {
+      const penaltyColor = crit.weighted_penalty === 0 ? "#16a34a" : (crit.weighted_penalty < 15 ? "#d97706" : "#dc2626");
+      return `
+        <tr style="border-bottom:1px solid #f1f5f9; font-size:12.5px;">
+          <td style="padding:8px 10px; font-weight:700; color:#1e293b;">${cIdx + 1}. ${crit.name}</td>
+          <td style="padding:8px 10px; color:#475569; font-size:12px;">${crit.description}</td>
+          <td style="padding:8px 10px; text-align:center; font-weight:600; color:#334155;">${crit.raw_metric.toFixed(1)}</td>
+          <td style="padding:8px 10px; text-align:center; font-weight:600; color:#64748b;">&times; ${crit.weight}</td>
+          <td style="padding:8px 10px; text-align:right; font-weight:700; color:${penaltyColor};">
+            ${crit.weighted_penalty === 0 ? '<span style="color:#16a34a; font-weight:800;">✓ 0.0</span>' : crit.weighted_penalty.toFixed(1)}
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    detailsContainer.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="font-weight:700; font-size:13.5px; color:#1e293b;">
+          Candidate #${selectedIdx + 1} — 7-Point AQWI Institutional Audit Breakdown
+        </div>
+        <div style="font-size:12px; color:#64748b;">
+          Total Penalty: <b style="color:#0f172a;">${activeRep.total_penalty.toFixed(1)}</b> &bull; Quality: <b style="color:#16a34a;">${activeRep.quality_score}%</b>
+        </div>
+      </div>
+      <table style="width:100%; border-collapse:collapse; background:#fff;">
+        <thead>
+          <tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0; font-size:11.5px; text-transform:uppercase; color:#64748b; font-weight:700; letter-spacing:0.3px;">
+            <th style="padding:8px 10px; text-align:left;">Judge Criterion</th>
+            <th style="padding:8px 10px; text-align:left;">Objective Goal</th>
+            <th style="padding:8px 10px; text-align:center;">Raw Metric</th>
+            <th style="padding:8px 10px; text-align:center;">Weight</th>
+            <th style="padding:8px 10px; text-align:right;">Weighted Penalty</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${critRows}
+        </tbody>
+      </table>
+    `;
+  }
+}
+
+window.selectCandidateTimetable = async function(runId, candIdx) {
+  try {
+    const res = await fetch(`/api/runs/${runId}/select-candidate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidate_idx: candIdx }),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    currentGrids = data.grids;
+    originalGrids = data.grids;
+    activeDivision = 0;
+    renderTabs();
+    renderGrid();
+
+    const runRes = await fetch(`/api/runs/${runId}`);
+    if (runRes.ok) {
+      const run = await runRes.json();
+      renderSummary(run);
+      renderJudgeLeaderboard(run);
+    }
+  } catch (err) {
+    console.error("Failed to switch candidate:", err);
+  }
+};
 
 function renderSummary(run) {
   $("summary").style.display = "flex";
@@ -973,6 +1249,7 @@ async function loadSavedRun(runId, autoScroll = true) {
       if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${run.label || "Saved Timetable"}</b> (${run.solver}) &middot; <span style="color:#64748b; font-size:12px;">🕒 Generated: ${istTime}</span>`;
       renderSummary(run);
       renderStages(run.stage_reports);
+      renderJudgeLeaderboard(run);
       currentGrids = run.grids;
       originalGrids = run.grids;
       movedIds = new Set();

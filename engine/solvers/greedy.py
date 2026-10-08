@@ -20,6 +20,7 @@ NO_ROOM = "NONE"
 
 class _Trackers:
     def __init__(self, problem: ProblemInstance):
+        self.problem = problem
         self.room_busy: set[tuple[str, int]] = set()
         self.faculty_busy: set[tuple[str, int]] = set()
         self.whole_division_busy: set[tuple[str, int]] = set()
@@ -29,6 +30,7 @@ class _Trackers:
         self.faculty_week_hours: dict[str, float] = {}
         self.division_by_id = problem.division_by_id()
         self.faculty_by_id = problem.faculty_by_id()
+        self._slots_by_id = {t.id: t for t in problem.time_slots}
 
     def division_free(self, division_id: str, batch_id: str | None, slot_ids: list[int]) -> bool:
         division = self.division_by_id.get(division_id)
@@ -52,8 +54,19 @@ class _Trackers:
             if (faculty_id, sid) in self.faculty_busy:
                 return False
         fac = self.faculty_by_id.get(faculty_id)
-        if fac and any(sid in fac.unavailable_slots for sid in slot_ids):
-            return False
+        if fac:
+            if any(sid in fac.unavailable_slots for sid in slot_ids):
+                return False
+            if fac.is_visiting:
+                if fac.visiting_days and day not in fac.visiting_days:
+                    return False
+                for sid in slot_ids:
+                    ts = self._slots_by_id.get(sid)
+                    if ts:
+                        if fac.visiting_start_time and ts.start < fac.visiting_start_time:
+                            return False
+                        if fac.visiting_end_time and ts.end > fac.visiting_end_time:
+                            return False
         if self.faculty_day_hours.get((faculty_id, day), 0) + duration > 6:
             return False
         if fac and self.faculty_week_hours.get(faculty_id, 0) + duration > fac.max_load_hours_per_week:
@@ -156,8 +169,12 @@ class GreedySolver(SolverBase):
             trackers.commit(req.division_id, None, None, None, day, slot_ids, req.duration_slots)
             assignments.append(Assignment(session_id=req.id, time_slot_id=pick.id, room_id=NO_ROOM))
 
-        # 2. lab batch-pairs: same slot, two different labs, simultaneously
-        for group_id, reqs in lab_groups.items():
+        # 2. lab batch-pairs: visiting faculty lab groups placed foremost
+        sorted_lab_groups = sorted(
+            lab_groups.items(),
+            key=lambda item: not any(r.is_visiting_faculty for r in item[1])
+        )
+        for group_id, reqs in sorted_lab_groups:
             placed = False
             for day, day_slots in slots_by_day.items():
                 if placed:
@@ -222,8 +239,8 @@ class GreedySolver(SolverBase):
                     placed = True
                     break
 
-        # 4. remaining single theory/tutorial sessions, heavy subjects first
-        singles.sort(key=lambda r: (r.session_type != SessionType.THEORY, r.course_code))
+        # 4. remaining single theory/tutorial sessions: VISITING FACULTY SESSIONS SORTED FOREMOST
+        singles.sort(key=lambda r: (not r.is_visiting_faculty, r.session_type != SessionType.THEORY, r.course_code))
         for req in singles:
             room_pool = classrooms
             placed = False

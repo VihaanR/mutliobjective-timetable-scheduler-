@@ -142,6 +142,10 @@ def build_problem_dict(session: Session, branch_ids: list[int] | None = None,
             "max_consecutive_sessions": f.max_consecutive_sessions,
             "unavailable_slots": list(f.unavailable_slot_ids),
             "preferred_slots": [],
+            "is_visiting": getattr(f, "is_visiting", False),
+            "visiting_days": list(getattr(f, "visiting_days", []) or []),
+            "visiting_start_time": getattr(f, "visiting_start_time", "") or "",
+            "visiting_end_time": getattr(f, "visiting_end_time", "") or "",
         }
         for f in faculty_rows
     ]

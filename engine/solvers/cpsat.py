@@ -565,6 +565,14 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "teacher_workload_spread": workload_unscaled,
     }
 
+    # Sequential search priority: branch and fix visiting faculty sessions foremost
+    visiting_vars = []
+    for req in requirements:
+        if req.is_visiting_faculty:
+            visiting_vars.extend([x[(req.id, s, r)] for (s, _, _, r) in candidates[req.id] if (req.id, s, r) in x])
+    if visiting_vars:
+        model.AddDecisionStrategy(visiting_vars, cp_model.CHOOSE_FIRST, cp_model.SELECT_MAX_VALUE)
+
     return _BuiltModel(
         model=model, x=x, requirements=requirements, candidates=candidates,
         objective_categories=objective_categories,

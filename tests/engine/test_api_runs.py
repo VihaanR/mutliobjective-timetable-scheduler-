@@ -311,3 +311,78 @@ def test_adjust_run_validates_day_and_status(client):
         s.add(TimetableRun(id=555, status="queued", solver="greedy", time_limit=3, problem_snapshot={}))
         s.commit()
     assert client.post("/api/runs/555/adjust", json={"day": 0}).status_code == 409            # not done
+
+
+def test_generate_multi_candidates_and_aqwi_reports(client):
+    _seed(client)
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 5, "num_candidates": 3})
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["status"] == "done"
+    assert run["num_candidates"] == 3
+    assert len(run["candidate_solutions"]) == 3
+    assert len(run["judge_reports"]) == 3
+
+    # Check that candidates are ranked by AQWI quality score
+    reports = run["judge_reports"]
+    assert reports[0]["rank"] == 1
+    assert reports[0]["quality_score"] >= reports[1]["quality_score"]
+    assert len(reports[0]["criteria"]) == 7
+
+
+def test_visiting_faculty_overrides_applied(client):
+    _seed(client)
+    faculty_list = client.get("/api/faculty").json()
+    assert len(faculty_list) > 0
+    fac = faculty_list[0]
+
+    # Generate with visiting faculty overrides
+    override = {
+        "id": fac["id"],
+        "code": fac["code"],
+        "name": fac["name"],
+        "is_visiting": True,
+        "visiting_days": [0, 2],
+        "visiting_start_time": "10:00",
+        "visiting_end_time": "14:00",
+    }
+    r = client.post("/api/runs", json={
+        "solver": "greedy",
+        "time_limit": 3,
+        "visiting_faculty_overrides": [override],
+    })
+    assert r.status_code == 200, r.text
+
+    # Verify that the DB faculty record now has visiting status persisted
+    with Session(get_engine()) as s:
+        updated_fac = s.get(Faculty, fac["id"])
+        assert updated_fac.is_visiting is True
+        assert updated_fac.visiting_days == [0, 2]
+        assert updated_fac.visiting_start_time == "10:00"
+        assert updated_fac.visiting_end_time == "14:00"
+
+
+def test_select_candidate_endpoint(client):
+    _seed(client)
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 5, "num_candidates": 2})
+    run_id = r.json()["run_id"]
+
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["selected_candidate_idx"] == 0
+
+    # Switch to candidate 1
+    switch_res = client.post(f"/api/runs/{run_id}/select-candidate", json={"candidate_idx": 1})
+    assert switch_res.status_code == 200
+    switch_data = switch_res.json()
+    assert switch_data["selected_candidate_idx"] == 1
+    assert "grids" in switch_data
+
+    # Verify updated run state
+    updated_run = client.get(f"/api/runs/{run_id}").json()
+    assert updated_run["selected_candidate_idx"] == 1
+
+    # Out of range candidate index rejected
+    bad_res = client.post(f"/api/runs/{run_id}/select-candidate", json={"candidate_idx": 99})
+    assert bad_res.status_code == 400

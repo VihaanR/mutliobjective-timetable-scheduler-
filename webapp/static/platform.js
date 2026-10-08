@@ -618,7 +618,7 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
   table.className = "tt";
 
   const thead = document.createElement("thead");
-  let hrow = "<tr><th class='time-col'>Time</th>";
+  let hrow = "<tr><th class='time-col'>Period / Time</th>";
   g.days.forEach((d) => (hrow += `<th>${d}</th>`));
   hrow += "</tr>";
   thead.innerHTML = hrow;
@@ -627,7 +627,16 @@ function buildGridTable(grids, mode, activeIdx, movedSet) {
   const tbody = document.createElement("tbody");
   g.periods.forEach((p) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="time-col">${p.start}<br>${p.end}</td>`;
+    tr.className = "period-row";
+    tr.dataset.period = p.period;
+    tr.innerHTML = `<td class="time-col" title="Period ${p.period + 1} (${p.start} - ${p.end})">
+      <div class="period-badge">Period ${p.period + 1}</div>
+      <div class="time-range">
+        <span class="time-start">${p.start}</span>
+        <span class="time-sep">-</span>
+        <span class="time-end">${p.end}</span>
+      </div>
+    </td>`;
     g.days.forEach((_, dayIdx) => {
       const key = `${dayIdx}_${p.period}`;
       const entries = (item.cells && item.cells[key]) || [];

@@ -728,11 +728,12 @@ class CPSATSolver(SolverBase):
             else:
                 remaining_iters = max(1, max_iters - iter_idx + 1)
                 if incumbent_solution is None:
-                    # Give iteration 1 the full remaining budget to discover and optimize the incumbent
-                    iter_time_limit = remaining_budget_s
+                    # Allocate ~55% of the budget to find and optimize the initial incumbent with all 8 workers
+                    iter_time_limit = remaining_budget_s if max_iters <= 1 else min(remaining_budget_s, max(45.0, remaining_budget_s * 0.55))
                     stop_on_first = False
                 else:
-                    iter_time_limit = min(remaining_budget_s, max(10.0, remaining_budget_s / remaining_iters))
+                    # Remaining budget goes to warm-started adaptive refinement with updated weights
+                    iter_time_limit = remaining_budget_s
                     stop_on_first = False
 
             if incumbent_solution is None:

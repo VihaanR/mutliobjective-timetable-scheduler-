@@ -67,10 +67,10 @@ def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: floa
                     "name": f"Adaptive Iteration {item['iteration']}",
                     "status": item.get("solver_status", "FEASIBLE"),
                     "wall_clock_s": round(item.get("solve_time", 0.0), 1),
-                    "hard": 0,
-                    "soft": round(item.get("soft_cost", 0.0), 1),
-                    "best_hard": 0,
-                    "best_soft": round(item.get("best_score", {}).get("soft_cost", item.get("soft_cost", 0.0)), 1),
+                    "hard": item.get("hard_violations", 0),
+                    "soft": round(item.get("weighted_soft_cost", item.get("soft_cost", 0.0)), 1),
+                    "best_hard": item.get("hard_violations", 0),
+                    "best_soft": round(item.get("weighted_soft_cost", item.get("soft_cost", 0.0)), 1),
                     "improved": item.get("improved", False),
                 }
                 for item in solution.extra_data["history"]
@@ -103,7 +103,7 @@ def run_generation(run_id: int) -> None:
 
             # Allocate time per candidate budget
             is_large_solve = len(problem.divisions) >= 6
-            min_floor = 65.0 if is_large_solve else 10.0
+            min_floor = 95.0 if is_large_solve else 10.0
             per_candidate_time = max(min_floor, run.time_limit / num_candidates) if num_candidates > 1 else max(run.time_limit, min_floor)
 
             candidate_entries = []

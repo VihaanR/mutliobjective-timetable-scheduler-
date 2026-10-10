@@ -40,7 +40,7 @@ def _stage_reports_from(result) -> list[dict]:
     ]
 
 
-from engine.judge import evaluate_aqwi
+from engine.judge import evaluate_aqwi, compute_pareto_front, AQWIReport
 
 
 def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: float, opt_mode: str, seed: int = 42):
@@ -118,11 +118,21 @@ def run_generation(run_id: int) -> None:
                     primary_stage_reports = stage_reps
 
                 if sol.status in {"FEASIBLE", "OPTIMAL", "PARTIAL"}:
-                    aqwi = evaluate_aqwi(sol, problem)
+                    sc = score(sol, problem)
+                    is_eligible = (sc.hard_violations == 0)
+                    aqwi = evaluate_aqwi(
+                        sol,
+                        problem,
+                        candidate_id=i,
+                        hard_violations=sc.hard_violations,
+                    )
                     candidate_entries.append({
+                        "candidate_id": i,
                         "solution": sol,
+                        "score_result": sc,
                         "report": aqwi,
                         "wall_clock": wall,
+                        "is_eligible": is_eligible,
                     })
 
             if not candidate_entries:
@@ -136,23 +146,60 @@ def run_generation(run_id: int) -> None:
                 session.commit()
                 return
 
-            # Rank candidate solutions by AQWI quality score (highest first), breaking ties by lower total penalty
-            candidate_entries.sort(
-                key=lambda c: (-c["report"].quality_score, c["report"].total_penalty)
+            # Hard-constraint validation as the first stage gate:
+            # Only candidates satisfying all mandatory hard constraints enter the eligible pool.
+            # If zero-hard candidates exist, strictly restrict the eligible pool to them;
+            # otherwise (e.g. heuristic/greedy runs) retain candidate entries with documented violation status.
+            zero_hard_entries = [c for c in candidate_entries if c["is_eligible"]]
+            eligible_entries = zero_hard_entries if zero_hard_entries else candidate_entries
+            ineligible_entries = [c for c in candidate_entries if c not in eligible_entries]
+
+            # Identify Pareto front across the 7 AQWI metrics among eligible candidates
+            compute_pareto_front(eligible_entries)
+
+            # Partition into non-dominated (Pareto-optimal) and dominated candidates
+            non_dominated = [c for c in eligible_entries if c["report"].pareto_status == "non_dominated"]
+            dominated = [c for c in eligible_entries if c["report"].pareto_status != "non_dominated"]
+
+            # Rank non-dominated candidates by descending AQWI score, breaking ties by lower unrounded total penalty, then candidate ID
+            non_dominated.sort(
+                key=lambda c: (
+                    -c["report"].quality_score,
+                    c["report"].total_penalty,
+                    c["candidate_id"],
+                )
             )
 
-            # Update rank numbers in reports
+            # Rank dominated candidates similarly
+            dominated.sort(
+                key=lambda c: (
+                    -c["report"].quality_score,
+                    c["report"].total_penalty,
+                    c["candidate_id"],
+                )
+            )
+
+            # Combined ranked order: Non-dominated Pareto front first, followed by dominated candidates, then any ineligible
+            ordered_entries = non_dominated + dominated + ineligible_entries
+
+            # Update rank numbers, recommended status, and active status in reports
             serialized_reports = []
             serialized_solutions = []
-            for rank_idx, entry in enumerate(candidate_entries, start=1):
+            for rank_idx, entry in enumerate(ordered_entries, start=1):
                 entry["report"].rank = rank_idx
+                # The highest-ranked non-dominated candidate is selected as the recommended active timetable
+                is_recommended = (rank_idx == 1 and entry in non_dominated)
+                entry["report"].is_recommended = is_recommended
+                entry["report"].is_active = (rank_idx == 1)
+
                 rep_dict = entry["report"].to_dict()
                 serialized_reports.append(rep_dict)
                 serialized_solutions.append(solution_to_dict(entry["solution"]))
 
-            # Select top-ranked candidate as the default active timetable
-            best_sol = candidate_entries[0]["solution"]
-            sc = score(best_sol, problem)
+            # Select recommended candidate as the default active timetable
+            best_entry = ordered_entries[0]
+            best_sol = best_entry["solution"]
+            best_sc = best_entry["score_result"]
             grids = annotate_grids(solution_to_grids(best_sol, problem), run.division_meta or {})
 
             run.solution = serialized_solutions[0]
@@ -162,8 +209,8 @@ def run_generation(run_id: int) -> None:
             run.candidate_solutions = serialized_solutions
             run.judge_reports = serialized_reports
             run.selected_candidate_idx = 0
-            run.hard = sc.hard_violations
-            run.soft = sc.soft_cost
+            run.hard = best_sc.hard_violations
+            run.soft = best_sc.soft_cost
             run.wall_clock = total_wall_clock
             run.status = "done"
             session.add(run)

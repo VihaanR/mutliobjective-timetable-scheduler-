@@ -70,7 +70,7 @@ def _tags_enabled() -> bool:
     """
     raw = os.environ.get("TIMETABLE_FORK_TAGS")
     if raw is None:
-        return HAS_TIMETABLE_FORK
+        return True
     return raw.strip().lower() not in _FALSEY
 
 
@@ -78,7 +78,7 @@ def _mrv_mode() -> str:
     """How to order branching decisions. Read from $TIMETABLE_MRV at call time so a benchmark
     can sweep modes without editing code.
 
-      auto    (default) dynamic on a forked build, off on a stock one
+      auto    (default) dynamic on a forked build, static tightest-first on a stock one
       dynamic CP-SAT re-ranks requirements by remaining candidates at every node (fork only)
       static  the best a stock build can do: one fixed order decided before search starts
       off     no decision strategy at all -- CP-SAT's own automatic search
@@ -90,9 +90,9 @@ def _mrv_mode() -> str:
     if mode not in {"auto", "dynamic", "static", "off"}:
         mode = "auto"
     if mode == "auto":
-        mode = "dynamic" if HAS_FORK_MRV else "off"
+        mode = "dynamic" if HAS_FORK_MRV else "static"
     if mode == "dynamic" and not HAS_FORK_MRV:
-        mode = "off"  # asked for a fork-only feature on a stock build
+        mode = "static"  # asked for a fork-only feature on a stock build -> graceful static fallback
     return mode
 
 
@@ -182,11 +182,6 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
             model.AddBoolOr([])
             continue
         model.AddExactlyOne(x[(req.id, s, r)] for (s, _, _, r) in cands)
-
-    mrv_mode = _mrv_mode()
-    if mrv_mode in ("dynamic", "static"):
-        _add_mrv_decision_strategy(model, requirements, candidates, x,
-                                   dynamic=(mrv_mode == "dynamic"))
 
     def _accumulate(bucket: dict, key, var):
         bucket.setdefault(key, []).append(var)
@@ -565,13 +560,21 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "teacher_workload_spread": workload_unscaled,
     }
 
-    # Sequential search priority: branch and fix visiting faculty sessions foremost
+    # Sequential search priority:
+    # 1. Branch and fix visiting faculty sessions foremost (narrowest availability windows)
     visiting_vars = []
     for req in requirements:
         if req.is_visiting_faculty:
             visiting_vars.extend([x[(req.id, s, r)] for (s, _, _, r) in candidates[req.id] if (req.id, s, r) in x])
     if visiting_vars:
         model.AddDecisionStrategy(visiting_vars, cp_model.CHOOSE_FIRST, cp_model.SELECT_MAX_VALUE)
+
+    # 2. Branch on remaining non-visiting requirements ordered by MRV (tightest domain first)
+    mrv_mode = _mrv_mode()
+    if mrv_mode in ("dynamic", "static"):
+        non_visiting_reqs = [r for r in requirements if not r.is_visiting_faculty]
+        _add_mrv_decision_strategy(model, non_visiting_reqs, candidates, x,
+                                   dynamic=(mrv_mode == "dynamic"))
 
     return _BuiltModel(
         model=model, x=x, requirements=requirements, candidates=candidates,
@@ -702,6 +705,17 @@ class CPSATSolver(SolverBase):
         total_budget_s = float(time_limit_s)
         last_iter_solution: Solution | None = None
 
+        if warm_start is not None and warm_start.status in ("OPTIMAL", "FEASIBLE"):
+            sc_warm = score(warm_start, problem)
+            if sc_warm.hard_violations == 0:
+                controller.update(
+                    iteration=0,
+                    solution=warm_start,
+                    score_result=sc_warm,
+                    solve_time=0.0,
+                    problem=problem,
+                )
+
         for iter_idx in range(1, max_iters + 1):
             elapsed_so_far = time.time() - start_time
             remaining_budget_s = max(0.0, total_budget_s - elapsed_so_far)
@@ -714,11 +728,11 @@ class CPSATSolver(SolverBase):
             else:
                 remaining_iters = max(1, max_iters - iter_idx + 1)
                 if incumbent_solution is None:
-                    # Allocate half the budget (or at least 30s) to establish a high-quality incumbent
-                    iter_time_limit = remaining_budget_s if max_iters <= 1 else max(30.0, remaining_budget_s / 2.0)
+                    # Allocate at least 55% of the total budget (or at least 30s) to establish a baseline-quality incumbent
+                    iter_time_limit = remaining_budget_s if max_iters <= 1 else max(30.0, remaining_budget_s * 0.55)
                     stop_on_first = False
                 else:
-                    iter_time_limit = min(remaining_budget_s, max(25.0, remaining_budget_s / remaining_iters))
+                    iter_time_limit = min(remaining_budget_s, max(20.0, remaining_budget_s / remaining_iters))
                     stop_on_first = False
 
             if incumbent_solution is None:

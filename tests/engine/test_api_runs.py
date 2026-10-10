@@ -325,11 +325,18 @@ def test_generate_multi_candidates_and_aqwi_reports(client):
     assert len(run["candidate_solutions"]) == 3
     assert len(run["judge_reports"]) == 3
 
-    # Check that candidates are ranked by AQWI quality score
+    # Check that candidates are ranked by AQWI quality score and Pareto status
     reports = run["judge_reports"]
     assert reports[0]["rank"] == 1
     assert reports[0]["quality_score"] >= reports[1]["quality_score"]
     assert len(reports[0]["criteria"]) == 7
+    assert reports[0]["cohort_baseline"] > 0
+    assert reports[0]["pareto_status"] in ("non_dominated", "dominated")
+    assert reports[0]["is_recommended"] is True
+    assert reports[0]["is_active"] is True
+    assert "M1" in reports[0]["criterion_metrics"]
+    assert reports[0]["criteria"]["c1_avoid_8_6_span"]["weight"] == 1.0
+    assert "resource_utilization" in reports[0]
 
 
 def test_visiting_faculty_overrides_applied(client):
@@ -382,6 +389,8 @@ def test_select_candidate_endpoint(client):
     # Verify updated run state
     updated_run = client.get(f"/api/runs/{run_id}").json()
     assert updated_run["selected_candidate_idx"] == 1
+    assert updated_run["judge_reports"][1]["is_active"] is True
+    assert updated_run["judge_reports"][0]["is_active"] is False
 
     # Out of range candidate index rejected
     bad_res = client.post(f"/api/runs/{run_id}/select-candidate", json={"candidate_idx": 99})

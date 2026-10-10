@@ -310,6 +310,18 @@ def select_candidate(
     run.grids = grids
     run.hard = sc.hard_violations
     run.soft = sc.soft_cost
+
+    if run.judge_reports:
+        updated_reps = []
+        for idx, rep in enumerate(run.judge_reports):
+            rep_copy = dict(rep)
+            is_act = (idx == body.candidate_idx)
+            is_rec = bool(rep_copy.get("is_recommended", False))
+            rep_copy["is_active"] = is_act
+            rep_copy["selection_status"] = "recommended" if (is_rec and is_act) else ("active" if is_act else ("recommended" if is_rec else "alternative"))
+            updated_reps.append(rep_copy)
+        run.judge_reports = updated_reps
+
     session.add(run)
     session.commit()
     session.refresh(run)

@@ -42,10 +42,39 @@ def sync_group_members(requirements: list[SessionRequirement]) -> dict[str, list
     return groups
 
 
+def _classroom_pref_key(rid: str) -> tuple[int, str]:
+    r = rid.upper()
+    if "51" in r:
+        return (0, rid)
+    if "52" in r:
+        return (1, rid)
+    if "53" in r:
+        return (2, rid)
+    return (10, rid)
+
+
+def _lab_pref_key(rid: str) -> tuple[int, str]:
+    r = rid.upper()
+    # 4th floor ICB labs are auxiliary/external to CSE-DS and must have lowest preference
+    if "ICB" in r:
+        return (99, rid)
+    # 5th floor CSE-DS home labs: L1, L2, L3, L4
+    if r == "L1" or r.startswith("L1-") or r.startswith("L1_") or r.startswith("LAB1"):
+        return (0, rid)
+    if r == "L2" or r.startswith("L2-") or r.startswith("L2_") or r.startswith("LAB2"):
+        return (1, rid)
+    if r == "L3" or r.startswith("L3-") or r.startswith("L3_") or r.startswith("LAB3"):
+        return (2, rid)
+    if r == "L4" or r.startswith("L4-") or r.startswith("L4_") or r.startswith("LAB4"):
+        return (3, rid)
+    return (10, rid)
+
+
 def room_options_for(req: SessionRequirement, problem: ProblemInstance,
                       groups: dict[str, list[SessionRequirement]]) -> list[str]:
-    classrooms = [r.id for r in problem.rooms if r.room_type == "classroom"]
-    labs = [r.id for r in problem.rooms if r.room_type == "lab"]
+    # Highest soft preference: classrooms 51, 52, 53 and labs L1, L2, L3
+    classrooms = sorted([r.id for r in problem.rooms if r.room_type == "classroom"], key=_classroom_pref_key)
+    labs = sorted([r.id for r in problem.rooms if r.room_type == "lab"], key=_lab_pref_key)
     if req.room_type == "none":
         return [NO_ROOM]
     if req.room_type == "lab":

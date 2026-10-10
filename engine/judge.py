@@ -34,6 +34,8 @@ class CriterionDetail:
     raw_metric: float
     weighted_penalty: float
     description: str
+    unit: str = "violations"
+    lower_is_better: bool = True
     breakdown: dict[str, Any] = field(default_factory=dict)
 
 
@@ -42,44 +44,223 @@ class AQWIReport:
     """Judge evaluation report for a candidate timetable."""
     total_penalty: float
     quality_score: float  # 0 to 100% (100 = flawless)
+    cohort_baseline: float = 1000.0
     rank: int = 1
     criteria: dict[str, CriterionDetail] = field(default_factory=dict)
+    pareto_status: str = "non_dominated"  # "non_dominated" | "dominated"
+    pareto_rank: int = 1
+    is_recommended: bool = False
+    is_active: bool = False
+    candidate_id: int = 0
+    hard_violations: int = 0
+    resource_utilization: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "candidate_id": self.candidate_id,
+            "hard_violations": self.hard_violations,
+            "hard_constraint_status": "passed" if self.hard_violations == 0 else "failed",
             "total_penalty": round(self.total_penalty, 2),
+            "unrounded_total_penalty": self.total_penalty,
+            "cohort_baseline": round(self.cohort_baseline, 1),
             "quality_score": round(self.quality_score, 1),
             "rank": self.rank,
+            "pareto_status": self.pareto_status,
+            "pareto_front_rank_or_group": self.pareto_rank,
+            "is_recommended": self.is_recommended,
+            "is_active": self.is_active,
+            "selection_status": "recommended" if self.is_recommended else ("active" if self.is_active else "alternative"),
+            "criterion_metrics": {
+                f"M{i}": round(v.raw_metric, 2)
+                for i, v in enumerate(self.criteria.values(), start=1)
+            },
+            "raw_metrics": {
+                k: round(v.raw_metric, 4)
+                for k, v in self.criteria.items()
+            },
             "criteria": {
                 k: {
                     "name": v.name,
                     "weight": v.weight,
                     "raw_metric": round(v.raw_metric, 2),
                     "weighted_penalty": round(v.weighted_penalty, 2),
+                    "unit": v.unit,
+                    "lower_is_better": v.lower_is_better,
                     "description": v.description,
                     "breakdown": v.breakdown,
                 }
                 for k, v in self.criteria.items()
             },
+            "resource_utilization": self.resource_utilization,
         }
 
 
-# Default weights calibrated for AQWI judge criteria
-DEFAULT_JUDGE_WEIGHTS: dict[str, float] = {
-    "c1_avoid_8_6_span": 50.0,
-    "c2_student_idle_gaps": 100.0,
-    "c3_same_day_lec_lab": 60.0,
-    "c4_faculty_load_variance": 20.0,
-    "c5_honours_boundary": 45.0,
-    "c6_three_consecutive_days": 35.0,
-    "c7_faculty_gaps_over_2h": 40.0,
+# Simplified AQWI weights: all seven criteria calibrated with unit weight 1.0
+AQWI_WEIGHTS: dict[str, float] = {
+    "c1_avoid_8_6_span": 1.0,
+    "c2_student_idle_gaps": 1.0,
+    "c3_same_day_lec_lab": 1.0,
+    "c4_faculty_load_variance": 1.0,
+    "c5_honours_boundary": 1.0,
+    "c6_three_consecutive_days": 1.0,
+    "c7_faculty_gaps_over_2h": 1.0,
 }
+
+DEFAULT_JUDGE_WEIGHTS: dict[str, float] = dict(AQWI_WEIGHTS)
+DEFAULT_COHORT_SCALE: float = 1000.0
+
+CRITERION_KEYS: list[str] = [
+    "c1_avoid_8_6_span",
+    "c2_student_idle_gaps",
+    "c3_same_day_lec_lab",
+    "c4_faculty_load_variance",
+    "c5_honours_boundary",
+    "c6_three_consecutive_days",
+    "c7_faculty_gaps_over_2h",
+]
+
+
+def compute_cohort_baseline(problem: ProblemInstance | None, scale: float = DEFAULT_COHORT_SCALE) -> float:
+    """Simplified cohort baseline K = scale * (N_divisions + N_faculty).
+
+    scale is a configurable institution scaling constant (default 1000.0).
+    Safely handles empty or invalid datasets.
+    """
+    n_divisions = len(problem.divisions) if (problem and getattr(problem, "divisions", None)) else 0
+    n_faculty = len(problem.faculty) if (problem and getattr(problem, "faculty", None)) else 0
+    count = n_divisions + n_faculty
+    if count == 0:
+        return max(1.0, float(scale))
+    return float(scale * count)
+
+
+def dominates(vec_a: list[float], vec_b: list[float], tolerance: float = 1e-6) -> bool:
+    """Candidate A dominates Candidate B iff:
+    A is no worse than B on every criterion (A[i] <= B[i] + tolerance)
+    AND
+    A is strictly better than B on at least one criterion (A[i] < B[i] - tolerance).
+    """
+    no_worse = all(a <= b + tolerance for a, b in zip(vec_a, vec_b))
+    strictly_better = any(a < b - tolerance for a, b in zip(vec_a, vec_b))
+    return no_worse and strictly_better
+
+
+def compute_pareto_front(candidates: list[dict[str, Any]], tolerance: float = 1e-6) -> list[dict[str, Any]]:
+    """Identifies dominated and non-dominated candidates across the 7 AQWI metrics.
+
+    Treats the 7 metrics as objectives to minimize.
+    A candidate is non-dominated (Pareto-optimal within the evaluated candidate pool)
+    iff no other evaluated candidate dominates it.
+    Identical metric vectors correctly do NOT dominate each other.
+    """
+    if not candidates:
+        return candidates
+
+    def get_vector(cand: dict[str, Any]) -> list[float]:
+        rep = cand.get("report")
+        if isinstance(rep, AQWIReport):
+            return [rep.criteria[k].raw_metric for k in CRITERION_KEYS]
+        elif isinstance(rep, dict):
+            if "raw_metrics" in rep:
+                return [float(rep["raw_metrics"].get(k, 0.0)) for k in CRITERION_KEYS]
+            crit = rep.get("criteria", {})
+            return [float(crit.get(k, {}).get("raw_metric", 0.0)) for k in CRITERION_KEYS]
+        return [0.0] * 7
+
+    vectors = [get_vector(c) for c in candidates]
+    n = len(candidates)
+    is_dominated = [False] * n
+
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            if dominates(vectors[j], vectors[i], tolerance=tolerance):
+                is_dominated[i] = True
+                break
+
+    for i, cand in enumerate(candidates):
+        status = "dominated" if is_dominated[i] else "non_dominated"
+        rank = 2 if is_dominated[i] else 1
+        rep = cand.get("report")
+        if isinstance(rep, AQWIReport):
+            rep.pareto_status = status
+            rep.pareto_rank = rank
+        elif isinstance(rep, dict):
+            rep["pareto_status"] = status
+            rep["pareto_front_rank_or_group"] = rank
+            rep["pareto_rank"] = rank
+
+    return candidates
+
+
+def compute_resource_utilization(solution: Solution, problem: ProblemInstance) -> dict[str, Any]:
+    """Computes classroom and lab utilization statistics for the timetable solution.
+
+    Tracks high-preference classrooms (51, 52, 53) vs auxiliary classrooms (e.g. 46),
+    and preferred labs (L1, L2, L3) vs auxiliary labs (e.g. L4).
+    """
+    total_slots = len(problem.time_slots) if problem.time_slots else 45
+    requirements = expand_requirements(problem)
+    req_by_id = {r.id: r for r in requirements}
+    assignments = solution.assignment_by_session()
+
+    room_hours: dict[str, int] = {}
+    for req_id, assignment in assignments.items():
+        req = req_by_id.get(req_id)
+        if not req or req.is_break or not assignment.room_id:
+            continue
+        room_hours[assignment.room_id] = room_hours.get(assignment.room_id, 0) + req.duration_slots
+
+    classroom_stats = []
+    lab_stats = []
+
+    for r in problem.rooms:
+        hours = room_hours.get(r.id, 0)
+        utilization_pct = round((hours / max(1, total_slots)) * 100.0, 1)
+        r_upper = r.id.upper()
+
+        is_pref_classroom = any(x in r_upper for x in ["51", "52", "53"])
+        # Preferred 5th floor CSE-DS labs: L1, L2, L3, L4 (explicitly excluding 4th floor ICB labs)
+        is_pref_lab = (
+            ("ICB" not in r_upper) and
+            any(
+                r_upper == x or r_upper.startswith(x + "-") or r_upper.startswith(x + "_")
+                for x in ["L1", "L2", "L3", "L4", "LAB1", "LAB2", "LAB3", "LAB4", "LAB-1", "LAB-2", "LAB-3", "LAB-4"]
+            )
+        )
+
+        item = {
+            "room_id": r.id,
+            "room_name": r.name,
+            "room_type": r.room_type,
+            "occupied_hours": hours,
+            "total_slots": total_slots,
+            "utilization_pct": utilization_pct,
+            "is_preferred": is_pref_classroom if r.room_type == "classroom" else is_pref_lab,
+        }
+
+        if r.room_type == "classroom":
+            classroom_stats.append(item)
+        elif r.room_type == "lab":
+            lab_stats.append(item)
+
+    classroom_stats.sort(key=lambda x: (not x["is_preferred"], -x["occupied_hours"], x["room_id"]))
+    lab_stats.sort(key=lambda x: (not x["is_preferred"], -x["occupied_hours"], x["room_id"]))
+
+    return {
+        "classrooms": classroom_stats,
+        "labs": lab_stats,
+    }
 
 
 def evaluate_aqwi(
     solution: Solution,
     problem: ProblemInstance,
     weights: dict[str, float] | None = None,
+    candidate_id: int = 0,
+    hard_violations: int = 0,
+    cohort_scale: float = DEFAULT_COHORT_SCALE,
 ) -> AQWIReport:
     """Evaluate a candidate solution using the 7-point AQWI Judge Criteria."""
     w = dict(DEFAULT_JUDGE_WEIGHTS)
@@ -329,6 +510,8 @@ def evaluate_aqwi(
             weight=w["c1_avoid_8_6_span"],
             raw_metric=c1_raw,
             weighted_penalty=w["c1_avoid_8_6_span"] * c1_raw,
+            unit="excess span points",
+            lower_is_better=True,
             description="Penalizes student days stretched across 10 hours (08:00 to 18:00).",
             breakdown={"violations": c1_details},
         ),
@@ -337,6 +520,8 @@ def evaluate_aqwi(
             weight=w["c2_student_idle_gaps"],
             raw_metric=c2_raw,
             weighted_penalty=w["c2_student_idle_gaps"] * c2_raw,
+            unit="idle gap hours",
+            lower_is_better=True,
             description="Penalizes idle unallotted gap hours between student lectures.",
             breakdown={"violations": c2_details},
         ),
@@ -345,6 +530,8 @@ def evaluate_aqwi(
             weight=w["c3_same_day_lec_lab"],
             raw_metric=c3_raw,
             weighted_penalty=w["c3_same_day_lec_lab"] * c3_raw,
+            unit="same-day overlaps",
+            lower_is_better=True,
             description="Prevents single-subject overload by separating theory and lab onto different days.",
             breakdown={"violations": c3_details},
         ),
@@ -353,6 +540,8 @@ def evaluate_aqwi(
             weight=w["c4_faculty_load_variance"],
             raw_metric=c4_raw,
             weighted_penalty=w["c4_faculty_load_variance"] * c4_raw,
+            unit="daily load variance (hours²)",
+            lower_is_better=True,
             description="Evenly spreads teaching hours across a faculty member's active days.",
             breakdown={"violations": c4_details},
         ),
@@ -361,6 +550,8 @@ def evaluate_aqwi(
             weight=w["c5_honours_boundary"],
             raw_metric=c5_raw,
             weighted_penalty=w["c5_honours_boundary"] * c5_raw,
+            unit="boundary violations",
+            lower_is_better=True,
             description="Places Honours and Open Electives at start (08:00) or end of day to avoid midday gaps.",
             breakdown={"violations": c5_details},
         ),
@@ -369,6 +560,8 @@ def evaluate_aqwi(
             weight=w["c6_three_consecutive_days"],
             raw_metric=c6_raw,
             weighted_penalty=w["c6_three_consecutive_days"] * c6_raw,
+            unit="3+ day streaks",
+            lower_is_better=True,
             description="Penalizes clustering the same subject on 3 or more consecutive weekdays.",
             breakdown={"violations": c6_details},
         ),
@@ -377,21 +570,32 @@ def evaluate_aqwi(
             weight=w["c7_faculty_gaps_over_2h"],
             raw_metric=c7_raw,
             weighted_penalty=w["c7_faculty_gaps_over_2h"] * c7_raw,
+            unit="excess waiting hours",
+            lower_is_better=True,
             description="Prevents faculty from waiting idle on campus for more than 2 hours between classes.",
             breakdown={"violations": c7_details},
         ),
     }
 
+    # Total unrounded penalty: P_total = sum(AQWI_WEIGHTS[key] * metrics[key]) = M1 + ... + M7
     total_penalty = sum(c.weighted_penalty for c in criteria.values())
 
-    # Map total penalty to an intuitive quality score [0% - 100%]
-    # Scaled to institution cohort size (divisions and faculty count)
-    k_baseline = max(2000.0, float(len(problem.divisions) * 1200.0 + len(problem.faculty) * 600.0))
+    # Simplified cohort baseline: K = scale * (N_divisions + N_faculty)
+    k_baseline = compute_cohort_baseline(problem, scale=cohort_scale)
+
+    # Simplified AQWI score: round(max(0.0, min(100.0, 100.0 * exp(-P_total / K))), 1)
     quality_score = round(max(0.0, min(100.0, 100.0 * math.exp(-total_penalty / k_baseline))), 1)
+
+    # Resource utilization breakdown
+    res_util = compute_resource_utilization(solution, problem)
 
     return AQWIReport(
         total_penalty=total_penalty,
         quality_score=quality_score,
+        cohort_baseline=k_baseline,
         rank=1,
         criteria=criteria,
+        candidate_id=candidate_id,
+        hard_violations=hard_violations,
+        resource_utilization=res_util,
     )

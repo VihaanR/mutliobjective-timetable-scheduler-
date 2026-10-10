@@ -203,9 +203,9 @@
       <div class="control" id="optimizationModeWrap">
         <label>Optimization</label>
         <select id="optimizationMode">
-          <option value="baseline" selected>Baseline (Stock Objective)</option>
+          <option value="adaptive" selected>Adaptive CP-SAT (Feedback Loop)</option>
+          <option value="baseline">Baseline (Stock Objective)</option>
           <option value="priority">Priority (Configured Weights)</option>
-          <option value="adaptive">Adaptive CP-SAT (Feedback Loop)</option>
         </select>
       </div>
       <div class="control" id="numCandidatesWrap">
@@ -333,20 +333,123 @@
     <div class="readiness-banner not-ready" id="solveWarning" style="display:none"></div>
 
     <!-- AQWI Judge Leaderboard & Candidate Selection -->
-    <div id="judgeSection" style="display:none; margin-bottom: 20px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 18px 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.03);">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px;">
+    <div id="judgeSection" style="display:none; margin-bottom: 24px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 20px 22px; box-shadow: 0 4px 18px rgba(0,0,0,0.04);">
+      <!-- Header Bar -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; border-bottom: 1.5px solid #e2e8f0; padding-bottom: 14px;">
         <div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <h3 style="margin: 0; font-size: 16px; color: #0f172a;">⚖️ Academic Quality &amp; Welfare Index (AQWI) Leaderboard</h3>
-            <span class="badge" style="background:#2563eb; color:#fff; font-size:11px; padding:2px 8px; border-radius:12px; font-weight:700;">7-Criteria Judge</span>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <h3 style="margin: 0; font-size: 17px; color: #0f172a; font-weight: 800;">⚖️ Academic Quality &amp; Welfare Index (AQWI) &amp; Ranked Analysis</h3>
+            <span class="badge" style="background:#2563eb; color:#fff; font-size:11px; padding:3px 9px; border-radius:12px; font-weight:700;">7-Criteria Multi-Objective</span>
+            <span class="badge" id="activeCandidateBadge" style="background:#16a34a; color:#fff; font-size:11px; padding:3px 9px; border-radius:12px; font-weight:700;">Active Schedule</span>
           </div>
-          <p style="margin: 4px 0 0; font-size: 12.5px; color: #64748b;">
-            Comprehensive academic score evaluating student day span, idle gaps, lab/theory spread, and faculty welfare.
+          <p style="margin: 5px 0 0; font-size: 12.5px; color: #64748b; line-height: 1.45;">
+            Evaluates candidate timetables across 7 pedagogical criteria with equal unit weighting (1.0). Multi-objective non-dominated candidates form the institutional Ranked Frontier (Tier 1 Optimal), sorted by composite AQWI score scaled to cohort baseline $K$.
           </p>
         </div>
-        <div id="candidateSwitcherWrap" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+          <div id="candidateSwitcherWrap" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:#475569;">
+            <label for="compareCandidateSelect" style="font-weight:600;">Benchmark vs:</label>
+            <select id="compareCandidateSelect" style="padding:4px 8px; font-size:12px; border-radius:6px; min-width:140px; border:1px solid #cbd5e1; background:#fff;"></select>
+          </div>
+        </div>
       </div>
-      <div id="candidateCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px;"></div>
+
+      <!-- Candidate Overview Cards -->
+      <div id="candidateCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-bottom: 20px;"></div>
+
+      <!-- Section: 7-Criterion Violation Profile Cards -->
+      <div style="margin-bottom: 20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h4 style="margin:0; font-size:14px; font-weight:700; color:#1e293b;">📋 7-Point Criterion Violation Audit</h4>
+          <span style="font-size:11.5px; color:#64748b;">Lower is better for all criteria &bull; Showing raw units &bull; $\Delta$ vs Benchmark</span>
+        </div>
+        <div id="criterionCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;"></div>
+      </div>
+
+      <!-- Visualizations Grid (Graphs A, B, C, D) -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 18px; margin-bottom: 20px;">
+        <!-- Graph A: Seven-Criterion Violation Profile -->
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700; font-size:13.5px; color:#0f172a;">📊 Graph A: Selected Candidate Violation Profile</div>
+              <div style="font-size:11px; color:#64748b;">Raw metric values for currently active/selected timetable</div>
+            </div>
+            <span class="badge" id="graphASelectedLabel" style="background:#eff6ff; color:#1d4ed8; font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px;">Candidate #1</span>
+          </div>
+          <div id="graphAContainer" style="min-height:260px; position:relative;"></div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:8px; line-height:1.4; border-top:1px dashed #e2e8f0; padding-top:6px;">
+            * Note: Raw metric units differ across criteria. Bar heights reflect raw counts/variances; lower is better. Tallest bar does not imply most severe violation.
+          </div>
+        </div>
+
+        <!-- Graph B: Candidate Comparison Grouped Bar Chart -->
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700; font-size:13.5px; color:#0f172a;">📈 Graph B: Multi-Candidate Comparison Across Criteria</div>
+              <div style="font-size:11px; color:#64748b;">Side-by-side grouped comparison across M1–M7 (Raw counts)</div>
+            </div>
+          </div>
+          <div id="graphBCandidateToggles" style="display:flex; gap:10px; flex-wrap:wrap; font-size:11.5px; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #f1f5f9;"></div>
+          <div id="graphBContainer" style="min-height:260px; position:relative;"></div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:8px; line-height:1.4; border-top:1px dashed #e2e8f0; padding-top:6px;">
+            * Synchronized with candidate toggles. Tooltips display exact candidate values and criterion units.
+          </div>
+        </div>
+
+        <!-- Graph C: AQWI Quality Score & Penalty Comparison -->
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+          <div style="margin-bottom:10px;">
+            <div style="font-weight:700; font-size:13.5px; color:#0f172a;">🎯 Graph C: AQWI Composite Score &amp; Baseline Decay</div>
+            <div style="font-size:11px; color:#64748b;">Score calibration formula: $\text{AQWI} = 100 \cdot e^{-P_{\text{total}} / K}$</div>
+          </div>
+          <div id="graphCContainer" style="min-height:240px; position:relative;"></div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:8px; line-height:1.4; border-top:1px dashed #e2e8f0; padding-top:6px;">
+            * $P_{\text{total}} = \sum_{i=1}^7 M_i$ (equal unit weights). Baseline $K = 1000 \cdot (N_{\text{divisions}} + N_{\text{faculty}})$.
+          </div>
+        </div>
+
+        <!-- Graph D: 2D Pareto Frontier Scatter Plot -->
+        <div style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.02);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700; font-size:13.5px; color:#0f172a;">⚡ Graph D: Ranked Multi-Objective Analysis &amp; Trade-Off Scatter</div>
+              <div style="font-size:11px; color:#64748b;">Student Welfare ($M_1+M_2+M_3+M_5+M_6$) vs Faculty Load ($M_4+M_7$)</div>
+            </div>
+            <span class="badge" style="background:#fef3c7; color:#92400e; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:6px;">Interactive</span>
+          </div>
+          <div id="graphDContainer" style="min-height:240px; position:relative;"></div>
+          <div style="font-size:10.5px; color:#64748b; margin-top:8px; line-height:1.4; border-top:1px dashed #e2e8f0; padding-top:6px;">
+            * Top-ranked candidates marked in blue/gold diamonds. Click point to activate candidate timetable.
+          </div>
+        </div>
+      </div>
+
+      <!-- Pareto Candidate Summary Table -->
+      <div id="paretoTableWrap" style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:20px;">
+        <div style="font-weight:700; font-size:13.5px; color:#0f172a; margin-bottom:8px;">
+          🏆 Candidate Evaluation &amp; Ranked Analysis Ledger
+        </div>
+        <div id="paretoTableContainer" style="overflow-x:auto;"></div>
+      </div>
+        <div id="paretoTableContainer" style="overflow-x:auto;"></div>
+      </div>
+
+      <!-- Resource & Lab Utilization Audit -->
+      <div id="resourceAuditWrap" style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div style="font-weight:700; font-size:13.5px; color:#0f172a;">🏢 Room &amp; Lab Utilization Audit (Soft Preference Alignment)</div>
+            <div style="font-size:11px; color:#64748b;">Priority classrooms: CR51, CR52, CR53 &bull; Priority labs: L1, L2, L3, L4 (Maximum saturation target)</div>
+          </div>
+          <span class="badge" style="background:#f0fdf4; color:#166534; font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid #bbf7d0;">Capacity Verified</span>
+        </div>
+        <div id="resourceAuditContainer" style="overflow-x:auto;"></div>
+      </div>
+
+      <!-- Criterion Breakdown Details Accordion/Container -->
       <div id="judgeBreakdownDetails" style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;"></div>
     </div>
 

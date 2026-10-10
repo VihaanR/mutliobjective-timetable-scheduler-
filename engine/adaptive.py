@@ -24,15 +24,15 @@ from typing import Any
 from engine.models import ProblemInstance, Solution, SessionType, expand_requirements
 from engine.scoring import ScoreResult, better, score
 
-# Default initial research weights (Phase 3)
+# Default calibrated base weights aligned with ground-truth scorer (scoring.py) and baseline CP-SAT
 DEFAULT_ADAPTIVE_BASE_WEIGHTS: dict[str, float] = {
-    "room_capacity_waste": 5.0,         # room_utilization
-    "lab_not_before_final_slots": 10.0, # lab_consecutive / late lab avoidance
-    "break_not_midmorning": 6.0,        # student_free_period_distribution
-    "day_span": 4.0,                    # avoid_last_period / compact day span
-    "idle_gaps": 50.0,                  # student gap minimization (institutional penalty 50.0)
-    "consecutive_gaps": 100.0,          # penalize multi-hour holes in student day
-    "teacher_workload_spread": 8.0,     # workload_balance
+    "room_capacity_waste": 0.5,         # room_utilization (proportional to ground truth 0.1)
+    "lab_not_before_final_slots": 10.0, # late lab avoidance
+    "break_not_midmorning": 5.0,        # student_free_period_distribution
+    "day_span": 20.0,                   # avoid_last_period / compact day span
+    "idle_gaps": 150.0,                 # student gap minimization (baseline 150.0, scorer 100.0)
+    "consecutive_gaps": 800.0,          # penalize multi-hour holes in student day (baseline 800.0)
+    "teacher_workload_spread": 2.0,     # gentle workload balance without compromising student gaps
 }
 
 # Aliases to map external/research names to canonical engine constraint keys
@@ -96,11 +96,11 @@ def compute_normalization_denominators(problem: ProblemInstance) -> dict[str, fl
 class AdaptiveConfig:
     """Configuration for adaptive CP-SAT objective reweighting."""
     enabled: bool = True
-    max_iterations: int = 10
+    max_iterations: int = 3
     learning_rate: float = 0.15
     decay_factor: float = 0.95
-    min_weight: float = 1.0
-    max_weight: float = 200.0
+    min_weight: float = 0.1
+    max_weight: float = 50.0
     stall_iterations: int = 3
     current_weight_factor: float = 1.0     # factor 'a'
     previous_weight_factor: float = 0.5    # factor 'b'
@@ -126,7 +126,7 @@ class AdaptiveWeightController:
         self.base_weights: dict[str, float] = {}
         for k, v in raw_base.items():
             canonical = canonical_constraint_name(k)
-            clamped_val = max(self.config.min_weight, min(self.config.max_weight, float(v)))
+            clamped_val = max(self.config.min_weight, float(v))
             self.base_weights[canonical] = clamped_val
 
         # Ensure all standard constraints have a base weight
@@ -247,13 +247,14 @@ class AdaptiveWeightController:
                 pressure = self.calculate_pressure(v_norm, v_prev_norm, pers_count)
 
                 if v_raw > 0:
-                    new_w = curr_w * (1.0 + self.config.learning_rate * pressure)
+                    upper_bound = max(self.config.max_weight, base_w)
+                    new_w = min(upper_bound, curr_w * (1.0 + self.config.learning_rate * pressure))
                 else:
-                    # Controlled decay toward base weight for satisfied constraints
+                    # Controlled decay toward base weight for satisfied constraints: max[W(k,0), 0.95 * W(k,t)]
                     new_w = max(base_w, curr_w * self.config.decay_factor)
 
-                # Clamp within [min_weight, max_weight]
-                new_w = max(self.config.min_weight, min(self.config.max_weight, new_w))
+                # Lower bound clamping
+                new_w = max(self.config.min_weight, new_w)
                 self.current_weights[k] = new_w
 
                 delta = abs(new_w - curr_w)

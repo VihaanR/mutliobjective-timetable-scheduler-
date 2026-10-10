@@ -278,7 +278,7 @@ async function loadVisitingFacultyModal() {
           is_visiting: true,
           visiting_days: f.visiting_days && f.visiting_days.length > 0 ? f.visiting_days : [0, 1, 2, 3, 4],
           visiting_start_time: f.visiting_start_time || "09:00",
-          visiting_end_time: f.visiting_end_time || "14:00",
+          visiting_end_time: f.visiting_end_time || "16:00",
         }));
     }
     renderVisitingFacultyList();
@@ -334,7 +334,7 @@ function renderVisitingFacultyList() {
             <span style="color:#475569; font-weight:600;">Hours:</span>
             <input type="text" value="${f.visiting_start_time || '09:00'}" style="width:50px; padding:2px 4px; font-size:11px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;" onchange="window.updateVisitingTime(${idx}, 'visiting_start_time', this.value)" placeholder="HH:MM">
             <span>to</span>
-            <input type="text" value="${f.visiting_end_time || '14:00'}" style="width:50px; padding:2px 4px; font-size:11px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;" onchange="window.updateVisitingTime(${idx}, 'visiting_end_time', this.value)" placeholder="HH:MM">
+            <input type="text" value="${f.visiting_end_time || '16:00'}" style="width:50px; padding:2px 4px; font-size:11px; text-align:center; border:1px solid #cbd5e1; border-radius:4px;" onchange="window.updateVisitingTime(${idx}, 'visiting_end_time', this.value)" placeholder="HH:MM">
           </div>
         </div>
       </div>
@@ -355,7 +355,7 @@ function addVisitingFacultyFromSelect() {
     is_visiting: true,
     visiting_days: fac.visiting_days && fac.visiting_days.length > 0 ? fac.visiting_days : [0, 1, 2, 3, 4],
     visiting_start_time: fac.visiting_start_time || "09:00",
-    visiting_end_time: fac.visiting_end_time || "14:00",
+    visiting_end_time: fac.visiting_end_time || "16:00",
   });
   renderVisitingFacultyList();
   updateVisitingSelectOptions();
@@ -476,7 +476,7 @@ async function generate(mode = "selected", specificBranchId = null) {
     is_visiting: true,
     visiting_days: f.visiting_days || [0, 1, 2, 3, 4],
     visiting_start_time: f.visiting_start_time || "09:00",
-    visiting_end_time: f.visiting_end_time || "14:00",
+    visiting_end_time: f.visiting_end_time || "16:00",
   }));
 
   const payload = {

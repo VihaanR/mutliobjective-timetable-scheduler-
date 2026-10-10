@@ -158,5 +158,68 @@ def build_candidates(problem: ProblemInstance,
                         if problem.blocked_room_slots and any((room_id, sid) in problem.blocked_room_slots for sid in occ_ids):
                             continue
                     cands.append((ts.id, occ_ids, day, room_id))
+
+        # Resilience safeguard: if an over-constrained visiting window leaves 0 valid slots
+        # for this requirement, fallback to relaxed hours/days so the model does not become INFEASIBLE.
+        if not cands and req.faculty_id:
+            fac = faculty_by_id.get(req.faculty_id)
+            if fac and fac.is_visiting:
+                # Fallback pass 1: keep visiting_days but allow all non-unavailable hours
+                for day, day_slots in days.items():
+                    if req.fixed_day is not None and day != req.fixed_day:
+                        continue
+                    if fac.visiting_days and len(fac.visiting_days) > 0 and day not in fac.visiting_days:
+                        continue
+                    for start_idx, ts in enumerate(day_slots):
+                        occ_ids = consecutive_slot_ids(day_slots, start_idx, req.duration_slots)
+                        if occ_ids is None:
+                            continue
+                        if req.is_break and (start_idx <= 1 or start_idx == len(day_slots) - 1):
+                            continue
+                        if is_oe and ts.period != 0 and ts.period < 5:
+                            continue
+                        if problem.blocked_slot_ids and not req.is_break and any(sid in problem.blocked_slot_ids for sid in occ_ids):
+                            continue
+                        if req.fixed_time_slot_id is not None and ts.id != req.fixed_time_slot_id:
+                            continue
+                        if any(sid in fac.unavailable_slots for sid in occ_ids):
+                            continue
+                        for room_id in room_options:
+                            if room_id != NO_ROOM:
+                                room = rooms_by_id[room_id]
+                                if room.capacity < occupants:
+                                    continue
+                                if problem.blocked_room_slots and any((room_id, sid) in problem.blocked_room_slots for sid in occ_ids):
+                                    continue
+                            cands.append((ts.id, occ_ids, day, room_id))
+
+                # Fallback pass 2: if still 0 slots, allow all teaching days
+                if not cands:
+                    for day, day_slots in days.items():
+                        if req.fixed_day is not None and day != req.fixed_day:
+                            continue
+                        for start_idx, ts in enumerate(day_slots):
+                            occ_ids = consecutive_slot_ids(day_slots, start_idx, req.duration_slots)
+                            if occ_ids is None:
+                                continue
+                            if req.is_break and (start_idx <= 1 or start_idx == len(day_slots) - 1):
+                                continue
+                            if is_oe and ts.period != 0 and ts.period < 5:
+                                continue
+                            if problem.blocked_slot_ids and not req.is_break and any(sid in problem.blocked_slot_ids for sid in occ_ids):
+                                continue
+                            if req.fixed_time_slot_id is not None and ts.id != req.fixed_time_slot_id:
+                                continue
+                            if any(sid in fac.unavailable_slots for sid in occ_ids):
+                                continue
+                            for room_id in room_options:
+                                if room_id != NO_ROOM:
+                                    room = rooms_by_id[room_id]
+                                    if room.capacity < occupants:
+                                        continue
+                                    if problem.blocked_room_slots and any((room_id, sid) in problem.blocked_room_slots for sid in occ_ids):
+                                        continue
+                                cands.append((ts.id, occ_ids, day, room_id))
+
         out[req.id] = cands
     return out

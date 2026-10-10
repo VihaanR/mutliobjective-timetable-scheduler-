@@ -58,7 +58,7 @@ def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: floa
         solution = solver.solve(
             problem,
             time_limit_s=time_limit,
-            extra_solver_params={"random_seed": seed},
+            extra_solver_params={"random_seed": seed, "num_search_workers": 8},
         )
         stage_reports = None
         if solution.extra_data and "history" in solution.extra_data:
@@ -102,7 +102,9 @@ def run_generation(run_id: int) -> None:
             num_candidates = max(1, getattr(run, "num_candidates", 1) or 1)
 
             # Allocate time per candidate budget
-            per_candidate_time = max(5.0, run.time_limit / num_candidates) if num_candidates > 1 else run.time_limit
+            is_large_solve = len(problem.divisions) >= 6
+            min_floor = 65.0 if is_large_solve else 10.0
+            per_candidate_time = max(min_floor, run.time_limit / num_candidates) if num_candidates > 1 else max(run.time_limit, min_floor)
 
             candidate_entries = []
             total_wall_clock = 0.0

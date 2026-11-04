@@ -2035,6 +2035,9 @@ async function loadSavedRun(runId, autoScroll = true) {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const run = await res.json();
     if (run.status === "done" && run.grids) {
+      // A saved run is fully editable too.  Keep the action target in sync with
+      // the timetable being displayed so a drop never edits a previously viewed run.
+      currentRunId = runId;
       const badge = $("activeRunBadge");
       const istTime = formatIST(run.created_at);
       if (badge) badge.innerHTML = `<span class="badge badge-success">Showing Run #${runId}</span> <b>${run.label || "Saved Timetable"}</b> (${run.solver}) &middot; <span style="color:#64748b; font-size:12px;">🕒 Generated: ${istTime}</span>`;

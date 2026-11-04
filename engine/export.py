@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -11,6 +12,19 @@ from fpdf.enums import XPos, YPos
 from engine.models import ProblemInstance, Solution, expand_requirements
 
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _safe_sheet_title(name: str, existing: set[str]) -> str:
+    clean = re.sub(r"[:\\/?*\[\]]", "-", name)
+    clean = clean.strip("' ")[:31] or "Sheet"
+    base = clean
+    counter = 1
+    while clean.lower() in existing:
+        suffix = f"_{counter}"
+        clean = base[: 31 - len(suffix)] + suffix
+        counter += 1
+    existing.add(clean.lower())
+    return clean
 
 
 def _division_grids(solution: Solution, problem: ProblemInstance) -> dict[str, dict[tuple[int, int], str]]:
@@ -59,8 +73,10 @@ def export_xlsx(solution: Solution, problem: ProblemInstance, path: str | Path) 
 
     wb = Workbook()
     wb.remove(wb.active)
+    existing_sheets: set[str] = set()
     for division in problem.divisions:
-        ws = wb.create_sheet(title=division.id)
+        sheet_title = _safe_sheet_title(division.id, existing_sheets)
+        ws = wb.create_sheet(title=sheet_title)
         ws.cell(row=1, column=1, value="Period").font = Font(bold=True)
         for day in range(problem.days_per_week):
             cell = ws.cell(row=1, column=day + 2, value=DAY_NAMES[day])

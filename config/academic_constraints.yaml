@@ -1,0 +1,250 @@
+# ==============================================================================
+# DJSCE CSE (Data Science) - Academic Timetable Constraints Specification
+# Term: Even Semester 2026-27 (Ground Truth: Faculty Load & Reference Timetables)
+# ==============================================================================
+version: "1.0"
+institution: "DJ Sanghvi College of Engineering"
+department: "CSE (Data Science)"
+
+# ------------------------------------------------------------------------------
+# 1. GLOBAL INSTITUTIONAL RULES
+# ------------------------------------------------------------------------------
+global_rules:
+  allowed_weekdays: [0, 1, 2, 3, 4]   # Monday (0) to Friday (4) only (HC-05)
+  total_periods_per_day: 10           # Period 0 (08:00) to Period 9 (17:00-18:00)
+  max_daily_academic_hours: 8         # Hard maximum 8 hours/day per division
+  avoid_consecutive_same_course: true # No two back-to-back lectures of same course
+  edge_course_categories:             # Forced to Period 0 (start) or Period 9 (end)
+    - "HONORS"
+    - "OPEN_ELECTIVE"
+    - "COURSERA"
+
+# ------------------------------------------------------------------------------
+# 2. FACULTY CONSTRAINTS & WORKLOAD POLICIES
+# ------------------------------------------------------------------------------
+faculty_rules:
+  # Constraint 1: 8 AM & 6 PM Shift Distribution (Strict Hard Constraint)
+  shift_distribution:
+    enforce_strict_hard: true
+    exempt_faculty: ["KS"] # Dr. Kriti Srivastava (HoD) exempt
+    required_8am_count: 1  # Each faculty member must take >= 1 08:00 AM class/week
+    required_6pm_count: 1  # Each faculty member must take >= 1 class ending at 18:00/week
+    target_full_time_faculty:
+      - "SV"   # Dr. Satishkumar Varma (GeoSpatial, MIII)
+      - "NM"   # Dr. Nilesh Marathe (Data Structures, HPC)
+      - "MD"   # Prof. Mangal Dandekar (EcoFin, CMPM)
+      - "AG"   # Dr. Ajitkumar Gudekar (QPM, OE)
+      - "KD"   # Dr. Kanchan Dabre (NLP, Adv Stats)
+      - "PV"   # Prof. Pooja Vartak (NLP, LRM, Java)
+      - "PSJ"  # Prof. Pradnya Joshi (TSA, WE, ML-III)
+      - "AS"   # Prof. Adil Shaikh (Data Ethics, ML-III, ADSL)
+      - "RP"   # Prof. Ruchika Patil (Data Structures, CMPM)
+      - "PJ"   # Dr. Poonam Jadhav (Java, CV, Adv Stats)
+      - "SM"   # Dr. Shruti Mathur (ML-III, Robotics)
+      - "SAM"  # Prof. Samiran Maity (Data Structures, QPM)
+      - "MAA"  # Prof. Mrudul Arkadi (CV, CMPM, ADSL)
+      - "NP"   # Dr. Namita Pulgam (Data Structures, AAIA, Adv Stats)
+      - "PP"   # Prof. Priya Parate (OE, FADS, ADSL)
+      - "GW"   # Prof. Govind Wakure (RE, WE, Green DS)
+      - "AR"   # Prof. Aditi Raut (HPC, Adv Stats, Java)
+      - "SSM"  # Dr. Shraddha More (ML-I, TSA, WE)
+
+  # Visiting Faculty Constraints
+  visiting_faculty:
+    TC: # Ms. Trupti Chandak
+      name: "Ms. Trupti Chandak"
+      role: "Visiting Faculty"
+      subjects: ["DS_Lab"]
+      allowed_days: [3, 4] # Thursday and Friday only
+      time_window:
+        start_hour: 10 # 10:00 AM (Period 2)
+        end_hour: 16   # 04:00 PM (Period 8)
+      consecutive_mode: "strict_back_to_back" # Minimize gaps on campus
+
+    SF: # Ms. Sonal Foss
+      name: "Ms. Sonal Foss"
+      role: "Visiting Faculty"
+      subjects: ["QPM_Theory"]
+      divisions: ["D1", "D3"]
+      timing: "afternoon_evening_only" # No morning sessions (Period >= 4, after 12:00)
+      max_consecutive_lectures: 2      # Up to 2 back-to-back lectures allowed
+
+    ND: # Dr. Niti Desai
+      name: "Dr. Niti Desai"
+      role: "Visiting Faculty"
+      subjects: ["TSA_Lab"]
+      batches: ["D11", "D31", "D32"]
+      consecutive_mode: "strict_back_to_back"
+
+# ------------------------------------------------------------------------------
+# 3. YEAR-WISE COHORT & CURRICULAR CONSTRAINTS
+# ------------------------------------------------------------------------------
+year_rules:
+  # ----------------------------------------------------------------------------
+  # SECOND YEAR (SY - Semester IV)
+  # ----------------------------------------------------------------------------
+  sy:
+    year_level: 2
+    semester: 4
+    divisions: ["D1", "D2", "D3", "D4"]
+    shift:
+      name: "afternoon_evening"
+      earliest_period: 3 # 11:00 AM onward (frees morning rooms & labs for TY)
+      latest_period: 9   # Runs till 06:00 PM
+    open_elective:
+      code: "OE"
+      status: "fixed_time_sync" # Synchronized across all SY divisions
+    labs:
+      default_duration_hours: 2 # All laboratory sessions strictly 2 hours
+      web_engineering_lab:
+        code: "WE_Lab"
+        title: "Web Engineering Laboratory"
+        total_weekly_hours: 4 # Total 4 hours per week per batch
+        sessions_per_week: 2  # Split into 2 distinct sessions of 2 hours each
+        session_duration_hours: 2 # Exactly 2 hours per session
+        back_to_back_allowed: false # Strictly NOT consecutive (placed on different days / non-adjacent slots)
+        slot_placement: "flexible" # Flexible placement across afternoon/evening periods
+        batch_faculty:
+          D11: "PSJ"
+          D12: "GW"
+
+  # ----------------------------------------------------------------------------
+  # THIRD YEAR (TY - Semester VI)
+  # ----------------------------------------------------------------------------
+  ty:
+    year_level: 3
+    semester: 6
+    divisions: ["D1", "D2", "D3"]
+    shift:
+      name: "morning"
+      mandatory_start_period: 0 # Strictly begins at 08:00 AM
+
+    # Elective Set 1 (PEC-4@): 3h Theory, 2h Lab - Strictly Synchronized
+    elective_set_1:
+      name: "PEC_Set_1"
+      synchronization: "strictly_concurrent" # TSA, AAIA, and MIII run in parallel
+      theory_duration_hours: 3
+      lab_duration_hours: 2
+      courses:
+        TSA:
+          code: "TSA"
+          title: "Time Series Analysis"
+          theory_classes:
+            - division: "D1"
+              capacity: 73
+              faculty: "PSJ"
+            - division: "D2"
+              capacity: 73
+              faculty: "SSM"
+          lab_batches:
+            D11: "ND"   # Dr. Niti Desai (Visiting)
+            D12: "PSJ"  # Prof. Pradnya Joshi
+            D21: "SSM"  # Dr. Shraddha More
+            D31: "ND"   # Dr. Niti Desai (Visiting)
+            D32: "ND"   # Dr. Niti Desai (Visiting)
+        AAIA:
+          code: "AAIA"
+          title: "Analysis of AI Algorithms"
+          theory_classes:
+            - division: "D1+D2+D3"
+              cohort: "all_students"
+              faculty: "NP" # Dr. Namita Pulgam
+          lab_batches:
+            all: "NP"
+        MIII:
+          code: "MIII"
+          title: "Medical Imaging Informatics and Interoperability"
+          theory_classes:
+            - division: "D1+D2+D3"
+              cohort: "all_students"
+              faculty: "SV" # Dr. Satishkumar Varma
+          lab_batches:
+            all: "SV"
+
+    # Elective Set 2 (PEC-5@): 4h Theory, 2h Lab - Non-overlapping with Set 1
+    elective_set_2:
+      name: "PEC_Set_2"
+      synchronization: "strictly_concurrent" # CV and Robotics run in parallel
+      non_overlapping_with: ["elective_set_1"]
+      theory_duration_hours: 4
+      lab_duration_hours: 2
+      courses:
+        CV:
+          code: "CV"
+          title: "Computer Vision"
+          theory_classes:
+            - division: "D1"
+              capacity: 95
+              faculty: "MAA" # Prof. Mrudul Arkadi
+            - division: "D2"
+              capacity: 95
+              faculty: "PJ"  # Dr. Poonam Jadhav
+          lab_batches:
+            D11: "PJ"
+            D12: "MAA"
+            D21: "PJ"
+            D22: "SV"
+            D31: "SV"
+            D32: "MAA"
+        Robotics:
+          code: "Robotics"
+          title: "Robotics and AI"
+          theory_classes:
+            - division: "D1+D2+D3"
+              cohort: "all_students"
+              faculty: "SM" # Dr. Shruti Mathur
+          lab_batches:
+            all: "SM"
+
+  # ----------------------------------------------------------------------------
+  # FINAL YEAR (BTech - Semester VII / VIII)
+  # ----------------------------------------------------------------------------
+  btech:
+    year_level: 4
+    semester: 7
+    active_weekdays: [0, 1, 2, 3] # Monday (0) to Thursday (3) only
+    friday_policy:
+      academic_sessions_banned: true
+      exceptions:
+        - code: "DMP" # Disaster Management & Preparedness (shared with rest)
+          faculty: "AP"
+          duration_hours: 2
+        - code: "RESEARCH_PROJECT" # Major Project / Research Work (Periods 1-4)
+    divisions:
+      D1:
+        mode: "regular"
+      D2:
+        mode: "ojt" # On-the-Job Training Track
+        max_weekly_hours: 4
+        online_courses: ["GDS", "GenAI"]
+
+    # Delivery Formats & Physical Room Requirements
+    course_delivery:
+      FADS:
+        code: "FADS"
+        title: "Financial Analysis and Decision Science"
+        theory:
+          hours: 2
+          mode: "online"
+          room_required: false # room_id = NO_ROOM
+          faculty: "PP"
+        tutorial:
+          hours: 1
+          mode: "offline"
+          room_required: true  # CR 53
+          faculty: "AR"
+      Data_Ethics:
+        code: "DE"
+        title: "Data Ethics"
+        tutorial:
+          hours: 1
+          mode: "offline"
+          cohort: "all_students"
+          faculty: "AS"
+      Coursera_GenAI:
+        code: "GenAI"
+        title: "Generative AI"
+        hours: 1
+        mode: "online"
+        room_required: false # room_id = NO_ROOM
+        placement: "edge_periods_only" # Period 0 or Period 9

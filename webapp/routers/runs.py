@@ -457,6 +457,33 @@ def move_session(
             status_code=400, detail="This session is pinned to a fixed slot and cannot be moved"
         )
 
+    # A practical occupies consecutive periods in one day.  Do this before any
+    # occupancy checks so a drop in the final period cannot spill into tomorrow.
+    target_day_slots = sorted(
+        (slot for slot in problem.time_slots if slot.day == body.target_day),
+        key=lambda slot: slot.period,
+    )
+    target_start_idx = next(
+        (idx for idx, slot in enumerate(target_day_slots) if slot.id == target_slot.id),
+        None,
+    )
+    target_slots = (
+        target_day_slots[target_start_idx : target_start_idx + req.duration_slots]
+        if target_start_idx is not None
+        else []
+    )
+    if (
+        len(target_slots) != req.duration_slots
+        or any(slot.period != target_slot.period + offset for offset, slot in enumerate(target_slots))
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Session {body.session_id!r} needs {req.duration_slots} consecutive periods "
+                "within one day"
+            ),
+        )
+
     # ── 3. Validate the target room ──────────────────────────────────────────────────────────
     rooms_by_id = problem.room_by_id()
     target_room = rooms_by_id.get(body.target_room_id)
@@ -480,6 +507,7 @@ def move_session(
     faculty_at_slot: dict[int, set[str]] = {}
     room_at_slot: dict[tuple[int, str], str] = {}  # (slot_id, room_id) -> session_id
 
+    slots_by_id = {slot.id: slot for slot in problem.time_slots}
     by_session: dict[str, Assignment] = baseline.assignment_by_session()
     for a in baseline.assignments:
         r = requirements.get(a.session_id)
@@ -487,10 +515,10 @@ def move_session(
             continue
         # A lab (duration=2) occupies two consecutive slots
         for k in range(r.duration_slots):
-            slot_in_run = next(
-                (t for t in problem.time_slots if t.id == a.time_slot_id + k), None
-            )
-            sid = a.time_slot_id + k if slot_in_run else a.time_slot_id
+            slot_in_run = slots_by_id.get(a.time_slot_id + k)
+            if slot_in_run is None:
+                continue
+            sid = slot_in_run.id
             if r.faculty_id:
                 faculty_at_slot.setdefault(sid, set()).add(r.faculty_id)
             cell_key = (a.time_slot_id + k, a.room_id)
@@ -508,7 +536,10 @@ def move_session(
     # Remove the session's current occupancy from the maps before conflict-checking the target
     current_req = requirements[body.session_id]
     for k in range(current_req.duration_slots):
-        old_sid = current_assignment.time_slot_id + k
+        old_slot = slots_by_id.get(current_assignment.time_slot_id + k)
+        if old_slot is None:
+            continue
+        old_sid = old_slot.id
         if current_req.faculty_id and old_sid in faculty_at_slot:
             faculty_at_slot[old_sid].discard(current_req.faculty_id)
         old_room_key = (old_sid, current_assignment.room_id)
@@ -516,8 +547,8 @@ def move_session(
             del room_at_slot[old_room_key]
 
     # ── 5. Conflict checks at the target slot ────────────────────────────────────────────────
-    for k in range(req.duration_slots):
-        check_slot_id = target_slot.id + k  # consecutive slots for labs
+    for k, target_occupied_slot in enumerate(target_slots):
+        check_slot_id = target_occupied_slot.id
         # Faculty double-booking
         if req.faculty_id and req.faculty_id in faculty_at_slot.get(check_slot_id, set()):
             raise HTTPException(

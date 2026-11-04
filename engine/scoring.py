@@ -435,6 +435,16 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
     soft_cost = sum(SOFT_WEIGHTS[k] * v for k, v in soft.items())
     details = {k: int(round(v)) for k, v in soft.items()}
     details.update({f"hard:{k}": v for k, v in hard_breakdown.items()})
+
+    # Record academic policy audit metrics without mutating universal hard feasibility
+    try:
+        from webapp.routers.constraints import evaluate_academic_violations
+        for label, count in evaluate_academic_violations(solution, problem).items():
+            if count > 0:
+                details[f"academic:{label}"] = count
+    except Exception:
+        pass
+
     return ScoreResult(hard_violations=hard, soft_cost=soft_cost, details=details)
 
 

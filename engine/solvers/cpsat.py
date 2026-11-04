@@ -576,6 +576,13 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         _add_mrv_decision_strategy(model, non_visiting_reqs, candidates, x,
                                    dynamic=(mrv_mode == "dynamic"))
 
+    # Apply modular academic constraints from unified controller
+    try:
+        from webapp.routers.constraints import apply_academic_constraints
+        apply_academic_constraints(model, problem, candidates, x)
+    except Exception as exc:
+        pass
+
     return _BuiltModel(
         model=model, x=x, requirements=requirements, candidates=candidates,
         objective_categories=objective_categories,

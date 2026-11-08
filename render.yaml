@@ -8,4 +8,8 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: TIMETABLE_DEV_MODE
-        value: 1
+        value: "1"
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: CP_SAT_WORKERS
+        value: "2"

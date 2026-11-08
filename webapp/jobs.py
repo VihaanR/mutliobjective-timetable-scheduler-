@@ -48,7 +48,7 @@ from engine.judge import evaluate_aqwi, compute_pareto_front, AQWIReport
 
 def _get_warm_start(problem) -> Solution | None:
     try:
-        ref_file = Path("data/reference/initial_even_semesters_run.json")
+        ref_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
         if ref_file.exists():
             with open(ref_file, "r", encoding="utf-8") as f:
                 ref_dict = json.load(f)
@@ -75,11 +75,12 @@ def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: floa
         from engine.solvers.cpsat import CPSATSolver
         solver = CPSATSolver(optimization_mode=opt_mode)
         warm = _get_warm_start(problem)
+        workers = int(os.environ.get("CP_SAT_WORKERS", "8"))
         solution = solver.solve(
             problem,
             time_limit_s=time_limit,
             warm_start=warm,
-            extra_solver_params={"random_seed": seed, "num_search_workers": 8},
+            extra_solver_params={"random_seed": seed, "num_search_workers": workers},
         )
         stage_reports = None
         if solution.extra_data and "history" in solution.extra_data:
@@ -166,6 +167,7 @@ def run_generation(run_id: int) -> None:
                 elif is_large_solve and candidate_entries and any(c["is_eligible"] for c in candidate_entries):
                     # For institution-scale problems, do not fail the run if secondary candidate time-out occurs
                     break
+                import gc; gc.collect()
 
             if not candidate_entries:
                 run.status = "failed"
@@ -282,8 +284,34 @@ def sweep_stale_running(session: Session) -> int:
 
 
 def has_active_run(session: Session) -> bool:
-    """True if a run is queued or running — the single-flight guard for `POST /api/runs`."""
+    """True if a run is queued or running — the single-flight guard for `POST /api/runs`.
+    
+    Includes auto-expiry for orphaned / killed background runs to prevent permanent 409 locks."""
+    from datetime import datetime, timezone
     active = session.exec(
         select(TimetableRun).where(TimetableRun.status.in_(["queued", "running"]))
-    ).first()
-    return active is not None
+    ).all()
+    if not active:
+        return False
+
+    now = datetime.now(timezone.utc)
+    still_active = False
+    for r in active:
+        max_duration = max(300.0, (getattr(r, "time_limit", 30.0) or 30.0) * (getattr(r, "num_candidates", 1) or 1) + 120.0)
+        created = getattr(r, "created_at", None)
+        if created:
+            if created.tzinfo is None:
+                elapsed = (now.replace(tzinfo=None) - created).total_seconds()
+            else:
+                elapsed = (now - created).total_seconds()
+            if elapsed > max_duration:
+                r.status = "failed"
+                r.error = "run timed out or background worker process was interrupted"
+                session.add(r)
+                continue
+        still_active = True
+
+    if not still_active:
+        session.commit()
+        return False
+    return True

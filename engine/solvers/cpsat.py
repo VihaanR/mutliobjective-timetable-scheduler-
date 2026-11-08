@@ -933,7 +933,7 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
-    solver.parameters.num_search_workers = 8
+    solver.parameters.num_search_workers = int(os.environ.get("CP_SAT_WORKERS", "8"))
 
     # CP-SAT discards variable names when it copies the user model into its presolve context
     # (ModelCopy::ImportVariablesAndMaybeIgnoreNames), because SatParameters.ignore_names

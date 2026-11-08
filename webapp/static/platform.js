@@ -3327,7 +3327,7 @@ const DataStudio = (function() {
       const b1Name = (div && div.batch1_name) ? div.batch1_name : (div ? div.name + "1" : "Batch 1");
       const b2Name = (div && div.batch2_name) ? div.batch2_name : (div ? div.name + "2" : "Batch 2");
 
-      const hasTheory = !crs || crs.theory_per_week > 0;
+      const hasTheory = !crs || crs.theory_per_week > 0 || (crs.tutorial_per_week > 0);
       const hasPractical = !crs || crs.practical_per_week > 0;
 
       const theoryCell = hasTheory
@@ -3409,7 +3409,7 @@ const DataStudio = (function() {
       allocCrsSel.onchange = () => {
         const crsId = Number(allocCrsSel.value);
         const crs = state.courses.find(c => c.id === crsId);
-        const hasTheory = !crs || crs.theory_per_week > 0;
+        const hasTheory = !crs || crs.theory_per_week > 0 || (crs.tutorial_per_week > 0);
         const hasPractical = !crs || crs.practical_per_week > 0;
         const singleField = $("dsAllocSingleField");
         const b1Field = $("dsAllocBatch1Field");

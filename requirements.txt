@@ -9,6 +9,7 @@ fastapi>=0.111
 uvicorn>=0.30            # ASGI server (port 8750; 8000 is OS-reserved on this box)
 python-multipart>=0.0.9  # multipart parsing for calendar/timetable-image upload
 sqlmodel>=0.0.16         # SQLite persistence (SQLAlchemy+Pydantic)
+pyyaml>=6.0              # academic constraints configuration
 
 # --- calendar / timetable-image ingestion ---
 pillow>=10.0             # validate/downscale uploaded jpg/png

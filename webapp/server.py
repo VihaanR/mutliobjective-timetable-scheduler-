@@ -30,34 +30,44 @@ from webapp.models_db import Branch, TimetableRun
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # create the platform's SQLite tables if new
-    calendar.get_upload_dir()  # ensure webapp/uploads/ exists
-    with Session(get_engine()) as session:
-        sweep_stale_running(session)  # fail any "running" run orphaned by a previous restart
-        if session.exec(select(Branch)).first() is None:
-            for ds in ("reference", "ty-sem6", "btech-sem8"):
-                try:
-                    seed._seed_and_report(session, ds, force=False)
-                except Exception as exc:
-                    print(f"Auto-seed warning for {ds}: {exc}")
-        if session.exec(select(TimetableRun)).first() is None:
-            initial_run_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
-            if initial_run_file.exists():
-                try:
-                    with open(initial_run_file, "r", encoding="utf-8") as f:
-                        run_dict = json.load(f)
-                    initial_run = TimetableRun(**run_dict)
-                    session.add(initial_run)
-                    session.commit()
-                except Exception as exc:
-                    print(f"Initial run seed warning: {exc}")
+    try:
+        init_db()  # create the platform's SQLite tables if new
+        calendar.get_upload_dir()  # ensure webapp/uploads/ exists
+        with Session(get_engine()) as session:
+            sweep_stale_running(session)  # fail any "running" run orphaned by a previous restart
+            if session.exec(select(Branch)).first() is None:
+                for ds in ("reference", "ty-sem6", "btech-sem8"):
+                    try:
+                        seed._seed_and_report(session, ds, force=False)
+                    except Exception as exc:
+                        print(f"Auto-seed warning for {ds}: {exc}")
+            if session.exec(select(TimetableRun)).first() is None:
+                initial_run_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
+                if initial_run_file.exists():
+                    try:
+                        with open(initial_run_file, "r", encoding="utf-8") as f:
+                            run_dict = json.load(f)
+                        initial_run = TimetableRun(**run_dict)
+                        session.add(initial_run)
+                        session.commit()
+                    except Exception as exc:
+                        print(f"Initial run seed warning: {exc}")
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        app.state.lifespan_error = str(exc)
     yield
 
 
 app = FastAPI(title="Timetable Scheduler", lifespan=lifespan)
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "lifespan_error": getattr(app.state, "lifespan_error", None)}
 
 for _router in (auth_router.router, branches.router, faculty.router, students.router, courses.router,
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,

@@ -46,23 +46,41 @@ def _stage_reports_from(result) -> list[dict]:
 from engine.judge import evaluate_aqwi, compute_pareto_front, AQWIReport
 
 
-def _get_warm_start(problem) -> Solution | None:
-    try:
-        ref_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
-        if ref_file.exists():
-            with open(ref_file, "r", encoding="utf-8") as f:
-                ref_dict = json.load(f)
-            if "solution" in ref_dict:
-                candidate = solution_from_dict(ref_dict["solution"])
-                sc = score(candidate, problem)
-                if sc.hard_violations == 0:
-                    return candidate
-    except Exception:
-        pass
+def _get_warm_start(problem, session: Session | None = None) -> Solution | None:
+    if session is not None:
+        try:
+            recent_done = session.exec(
+                select(TimetableRun).where(TimetableRun.status == "done", TimetableRun.hard == 0).order_by(TimetableRun.id.desc())
+            ).all()
+            for r in recent_done:
+                if r.solution:
+                    sol_dict = r.solution if isinstance(r.solution, dict) else json.loads(r.solution)
+                    cand = solution_from_dict(sol_dict)
+                    sc = score(cand, problem)
+                    if sc.hard_violations == 0:
+                        return cand
+        except Exception:
+            pass
+
+    for path in [
+        Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json",
+        Path("data/reference/initial_even_semesters_run.json"),
+    ]:
+        try:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    ref_dict = json.load(f)
+                if "solution" in ref_dict:
+                    candidate = solution_from_dict(ref_dict["solution"])
+                    sc = score(candidate, problem)
+                    if sc.hard_violations == 0:
+                        return candidate
+        except Exception:
+            pass
     return None
 
 
-def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: float, opt_mode: str, seed: int = 42):
+def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: float, opt_mode: str, seed: int = 42, session: Session | None = None):
     if solver_name == "pipeline":
         config = PipelineConfig(
             cpsat_time_limit_s=time_limit,
@@ -74,7 +92,7 @@ def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: floa
     elif solver_name == "cpsat":
         from engine.solvers.cpsat import CPSATSolver
         solver = CPSATSolver(optimization_mode=opt_mode)
-        warm = _get_warm_start(problem)
+        warm = _get_warm_start(problem, session=session)
         workers = int(os.environ.get("CP_SAT_WORKERS", "8"))
         solution = solver.solve(
             problem,
@@ -141,7 +159,7 @@ def run_generation(run_id: int) -> None:
                 seed = 42 + i * 10007
                 # For large institutional runs, if Candidate 0 is already feasible, candidate generation succeeded
                 sol, stage_reps, wall = _solve_single(
-                    run, problem, run.solver, per_candidate_time, opt_mode, seed=seed
+                    run, problem, run.solver, per_candidate_time, opt_mode, seed=seed, session=session
                 )
                 total_wall_clock += wall
                 if i == 0:

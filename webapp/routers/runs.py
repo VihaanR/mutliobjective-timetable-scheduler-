@@ -152,8 +152,14 @@ def generate(
     session.commit()
     session.refresh(run)
 
-    background.add_task(run_generation, run.id)
-    return {"run_id": run.id}
+    if os.environ.get("VERCEL"):
+        # Serverless execution: synchronous solve to avoid container suspension mid-task
+        run_generation(run.id)
+        session.refresh(run)
+        return {"run_id": run.id, "status": run.status}
+    else:
+        background.add_task(run_generation, run.id)
+        return {"run_id": run.id, "status": "queued"}
 
 
 def _run_solver_compare(problem, solver_name: str, time_limit: float,

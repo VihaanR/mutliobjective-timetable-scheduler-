@@ -636,7 +636,10 @@ function pollRun(runId, label) {
         $("adjStatus").textContent = "";
         loadHistory();
       } else {
-        statusEl.textContent = `run #${runId} failed: ${run.error || "unknown error"}`;
+        const errDisplay = (run.error === "orphaned by restart")
+          ? "solver task timed out or was interrupted"
+          : (run.error || "unknown error");
+        statusEl.textContent = `run #${runId} failed: ${errDisplay}`;
         renderDiagnosticAlert({
           show: true,
           type: "error",
@@ -3324,6 +3327,29 @@ const DataStudio = (function() {
       const b1Name = (div && div.batch1_name) ? div.batch1_name : (div ? div.name + "1" : "Batch 1");
       const b2Name = (div && div.batch2_name) ? div.batch2_name : (div ? div.name + "2" : "Batch 2");
 
+      const hasTheory = !crs || crs.theory_per_week > 0;
+      const hasPractical = !crs || crs.practical_per_week > 0;
+
+      const theoryCell = hasTheory
+        ? `<select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'faculty_id', this.value)">
+            ${makeFacOptions(a.faculty_id)}
+          </select>`
+        : `<span class="muted" style="font-size:11px; font-style:italic; padding:3px 8px; background:#f1f5f9; border-radius:4px; display:inline-block; color:#64748b;">N/A (Lab Only)</span>`;
+
+      const b1Cell = hasPractical
+        ? `<span style="font-size:10.5px; font-weight:700; color:#64748b; margin-right:4px;">${esc(b1Name)}:</span>
+           <select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'batch1_faculty_id', this.value)">
+             ${makeFacOptions(a.batch1_faculty_id)}
+           </select>`
+        : `<span class="muted" style="font-size:11px; font-style:italic; padding:3px 8px; background:#f1f5f9; border-radius:4px; display:inline-block; color:#64748b;">N/A (Theory Only)</span>`;
+
+      const b2Cell = hasPractical
+        ? `<span style="font-size:10.5px; font-weight:700; color:#64748b; margin-right:4px;">${esc(b2Name)}:</span>
+           <select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'batch2_faculty_id', this.value)">
+             ${makeFacOptions(a.batch2_faculty_id)}
+           </select>`
+        : `<span class="muted" style="font-size:11px; font-style:italic; padding:3px 8px; background:#f1f5f9; border-radius:4px; display:inline-block; color:#64748b;">N/A (Theory Only)</span>`;
+
       return `
         <tr>
           <td>
@@ -3336,23 +3362,9 @@ const DataStudio = (function() {
             <div style="font-weight:700; color:#0f172a;">${esc(crs ? crs.code : `#${a.course_id}`)}</div>
             <div style="font-size:11.5px; color:#64748b;">${esc(crs ? crs.title : "")} (${crs ? crs.category : ""})</div>
           </td>
-          <td>
-            <select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'faculty_id', this.value)">
-              ${makeFacOptions(a.faculty_id)}
-            </select>
-          </td>
-          <td>
-            <span style="font-size:10.5px; font-weight:700; color:#64748b; margin-right:4px;">${esc(b1Name)}:</span>
-            <select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'batch1_faculty_id', this.value)">
-              ${makeFacOptions(a.batch1_faculty_id)}
-            </select>
-          </td>
-          <td>
-            <span style="font-size:10.5px; font-weight:700; color:#64748b; margin-right:4px;">${esc(b2Name)}:</span>
-            <select class="studio-fac-select" onchange="DataStudio.updateAlloc(${a.id}, 'batch2_faculty_id', this.value)">
-              ${makeFacOptions(a.batch2_faculty_id)}
-            </select>
-          </td>
+          <td>${theoryCell}</td>
+          <td>${b1Cell}</td>
+          <td>${b2Cell}</td>
           <td style="text-align:center;">
             <button type="button" class="action-btn-del" onclick="DataStudio.deleteItem('allocations', ${a.id})" title="Remove Allocation" style="padding:4px 8px; font-size:11px;">Remove</button>
           </td>
@@ -3397,11 +3409,12 @@ const DataStudio = (function() {
       allocCrsSel.onchange = () => {
         const crsId = Number(allocCrsSel.value);
         const crs = state.courses.find(c => c.id === crsId);
-        const hasPractical = crs && crs.practical_per_week > 0;
+        const hasTheory = !crs || crs.theory_per_week > 0;
+        const hasPractical = !crs || crs.practical_per_week > 0;
         const singleField = $("dsAllocSingleField");
         const b1Field = $("dsAllocBatch1Field");
         const b2Field = $("dsAllocBatch2Field");
-        if (singleField) singleField.style.display = hasPractical ? "none" : "block";
+        if (singleField) singleField.style.display = hasTheory ? "block" : "none";
         if (b1Field) b1Field.style.display = hasPractical ? "block" : "none";
         if (b2Field) b2Field.style.display = hasPractical ? "block" : "none";
       };
@@ -3711,7 +3724,7 @@ function renderDiagnosticAlert(options) {
           </button>
           <button type="button" class="btn-recovery secondary" id="btnLoadProvenRun83">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-            <span>Load Proven Adaptive CP-SAT Run #83 (0 Clashes)</span>
+            <span>Load Proven Feasible Timetable (0 Clashes)</span>
           </button>
           <button type="button" class="btn-recovery secondary" id="btnOpenSolverTab">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path></svg>

@@ -7,6 +7,7 @@ exception is caught and recorded on the run row (`status="failed"`, `error=...`)
 show it, rather than being lost to a background-thread traceback that nothing observes.
 """
 from __future__ import annotations
+import os
 
 from sqlmodel import Session, select
 
@@ -103,8 +104,11 @@ def run_generation(run_id: int) -> None:
 
             # Allocate time per candidate budget
             is_large_solve = len(problem.divisions) >= 6
-            min_floor = 95.0 if is_large_solve else 10.0
-            per_candidate_time = max(min_floor, run.time_limit / num_candidates) if num_candidates > 1 else max(run.time_limit, min_floor)
+            if os.environ.get("VERCEL"):
+                per_candidate_time = min(25.0, max(8.0, run.time_limit / num_candidates))
+            else:
+                min_floor = 95.0 if is_large_solve else 10.0
+                per_candidate_time = max(min_floor, run.time_limit / num_candidates) if num_candidates > 1 else max(run.time_limit, min_floor)
 
             candidate_entries = []
             total_wall_clock = 0.0

@@ -43,21 +43,40 @@ async def lifespan(app: FastAPI):
         calendar.get_upload_dir()  # ensure webapp/uploads/ exists
         with Session(get_engine()) as session:
             sweep_stale_running(session)  # fail any "running" run orphaned by a previous restart
-            if session.exec(select(Branch)).first() is None:
-                for ds in ("reference", "ty-sem6", "btech-sem8"):
+            is_testing = bool(os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING"))
+            if not is_testing:
+                if session.exec(select(Branch)).first() is None:
+                    for ds in ("reference", "ty-sem6", "btech-sem8"):
+                        try:
+                            seed._seed_and_report(session, ds, force=False)
+                        except Exception as exc:
+                            print(f"Auto-seed warning for {ds}: {exc}")
+                else:
                     try:
-                        seed._seed_and_report(session, ds, force=False)
+                        _, issues = readiness(session, qualify_ids=True)
+                        if issues:
+                            for ds in ("reference", "ty-sem6", "btech-sem8"):
+                                seed._seed_and_report(session, ds, force=True)
                     except Exception as exc:
-                        print(f"Auto-seed warning for {ds}: {exc}")
-            else:
-                try:
-                    _, issues = readiness(session, qualify_ids=True)
-                    if issues:
-                        for ds in ("reference", "ty-sem6", "btech-sem8"):
-                            seed._seed_and_report(session, ds, force=True)
-                except Exception as exc:
-                    print(f"Auto-repair check warning: {exc}")
-            if session.exec(select(TimetableRun)).first() is None:
+                        print(f"Auto-repair check warning: {exc}")
+            # Auto-repair any allocations where course has theory but faculty_id is None
+            try:
+                from webapp.models_db import Allocation, Course
+                allocs_to_fix = session.exec(
+                    select(Allocation).where(Allocation.faculty_id == None, Allocation.batch1_faculty_id != None)
+                ).all()
+                fixed_count = 0
+                for a in allocs_to_fix:
+                    crs = session.get(Course, a.course_id)
+                    if crs and crs.theory_per_week > 0:
+                        a.faculty_id = a.batch1_faculty_id
+                        fixed_count += 1
+                if fixed_count > 0:
+                    session.commit()
+            except Exception as exc:
+                print(f'Allocation auto-repair warning: {exc}')
+
+            if not is_testing and session.exec(select(TimetableRun)).first() is None:
                 initial_run_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
                 if initial_run_file.exists():
                     try:

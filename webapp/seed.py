@@ -197,10 +197,12 @@ def _seed_dataset(session: Session, data: dict, branch_code: str, force: bool) -
                     alloc.batch1_faculty_id = b1.id if b1 else None
                     alloc.batch2_faculty_id = b2.id if b2 else None
                 elif len(value) == 2:
-                    b1 = faculty_cache.get(value[0])
-                    b2 = faculty_cache.get(value[1])
-                    alloc.batch1_faculty_id = b1.id if b1 else None
-                    alloc.batch2_faculty_id = b2.id if b2 else None
+                    f0 = faculty_cache.get(value[0])
+                    f1 = faculty_cache.get(value[1])
+                    if course.theory_per_week and course.theory_per_week > 0:
+                        alloc.faculty_id = f0.id if f0 else None
+                    alloc.batch1_faculty_id = f0.id if f0 else None
+                    alloc.batch2_faculty_id = f1.id if f1 else None
                 elif len(value) == 1:
                     fac = faculty_cache.get(value[0])
                     alloc.faculty_id = fac.id if fac else None

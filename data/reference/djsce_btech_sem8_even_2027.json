@@ -423,6 +423,36 @@
     {
       "id": "ND",
       "name": "Dr. Niti Desai (Visiting Faculty)"
+    },
+    {
+      "id": "AS",
+      "name": "Prof. Adil Shaikh",
+      "unavailable_slots": []
+    },
+    {
+      "id": "PJ",
+      "name": "Dr. Poonam Jadhav",
+      "unavailable_slots": []
+    },
+    {
+      "id": "PV",
+      "name": "Prof. Pooja Vartak",
+      "unavailable_slots": []
+    },
+    {
+      "id": "RK",
+      "name": "Prof. Rupali Karande",
+      "unavailable_slots": []
+    },
+    {
+      "id": "SM",
+      "name": "Dr. Shruti Mathur",
+      "unavailable_slots": []
+    },
+    {
+      "id": "SV",
+      "name": "Dr. Satishkumar Varma",
+      "unavailable_slots": []
     }
   ],
   "courses": [

@@ -27,6 +27,7 @@ from webapp.routers import (
     students, constraints,
 )
 from webapp.models_db import Branch, TimetableRun
+from webapp.problem_builder import readiness
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -48,6 +49,14 @@ async def lifespan(app: FastAPI):
                         seed._seed_and_report(session, ds, force=False)
                     except Exception as exc:
                         print(f"Auto-seed warning for {ds}: {exc}")
+            else:
+                try:
+                    _, issues = readiness(session, qualify_ids=True)
+                    if issues:
+                        for ds in ("reference", "ty-sem6", "btech-sem8"):
+                            seed._seed_and_report(session, ds, force=True)
+                except Exception as exc:
+                    print(f"Auto-repair check warning: {exc}")
             if session.exec(select(TimetableRun)).first() is None:
                 initial_run_file = Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"
                 if initial_run_file.exists():

@@ -186,6 +186,9 @@ def _seed_dataset(session: Session, data: dict, branch_code: str, force: bool) -
                 continue
             alloc = Allocation(division_id=division.id, course_id=course.id)
             if isinstance(value, list):
+                for f_code in value:
+                    if f_code and f_code not in faculty_cache:
+                        _upsert_faculty(session, faculty_cache, f_code, f'Prof. {f_code}', [])
                 if len(value) >= 3:
                     fac = faculty_cache.get(value[0])
                     b1 = faculty_cache.get(value[1])
@@ -202,6 +205,8 @@ def _seed_dataset(session: Session, data: dict, branch_code: str, force: bool) -
                     fac = faculty_cache.get(value[0])
                     alloc.faculty_id = fac.id if fac else None
             else:
+                if value and value not in faculty_cache:
+                    _upsert_faculty(session, faculty_cache, value, f'Prof. {value}', [])
                 fac = faculty_cache.get(value)
                 alloc.faculty_id = fac.id if fac else None
             session.add(alloc)

@@ -280,12 +280,14 @@ class TimetableRun(SQLModel, table=True):
     candidate_solutions: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
     judge_reports: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
     selected_candidate_idx: int = 0
+    pinned_session_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    lifecycle_status: str = "draft"       # "draft" | "reviewed" | "approved" | "published"
     hard: Optional[int] = None
     soft: Optional[float] = None
     wall_clock: Optional[float] = None    # total solve wall-clock seconds (pipeline total, or solver's)
     error: Optional[str] = None
 
-    @field_validator("candidate_solutions", "judge_reports", mode="before")
+    @field_validator("candidate_solutions", "judge_reports", "pinned_session_ids", mode="before")
     @classmethod
     def _coerce_run_lists(cls, v):
         if v is None:

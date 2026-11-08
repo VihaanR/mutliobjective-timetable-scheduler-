@@ -32,6 +32,7 @@ SOFT_WEIGHTS = {
     "lab_distribution_pattern": 3.0,
     "break_not_midmorning": 1.5,
     "day_span": 2.0,
+    "division_day_not_8am": 15.0,
 }
 
 
@@ -91,6 +92,8 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
     division_day_periods: dict[tuple[str, int], list[int]] = {}
     division_day_break_periods: dict[tuple[str, int], set[int]] = {}
     division_day_hours: dict[tuple[str, int], float] = {}
+    batch_day_periods: dict[tuple[str, str | None, int], list[int]] = {}
+    batch_day_hours: dict[tuple[str, str | None, int], float] = {}
     faculty_day_hours: dict[tuple[str, int], float] = {}
     faculty_day_periods: dict[tuple[str, int], list[int]] = {}
     faculty_week_hours: dict[str, float] = {}
@@ -204,6 +207,15 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         dkey = (req.division_id, ts.day)
         division_day_periods.setdefault(dkey, []).extend(range(ts.period, ts.period + req.duration_slots))
 
+        division_obj = divisions_by_id.get(req.division_id)
+        div_batches = division_obj.batch_pair() if division_obj else ()
+        target_batches = [req.batch_id] if req.batch_id else (div_batches if div_batches else (None,))
+        for b in target_batches:
+            b_key = (req.division_id, b, ts.day)
+            batch_day_periods.setdefault(b_key, []).extend(range(ts.period, ts.period + req.duration_slots))
+            if not req.is_break and req.course_code != "BREAK":
+                batch_day_hours[b_key] = batch_day_hours.get(b_key, 0) + req.duration_slots
+
         if not req.is_break and req.course_code != "BREAK":
             # simultaneous batch-pair lab sessions are one wall-clock block for the division,
             # not two -- only the first-seen half of a batch_group contributes to division hours
@@ -285,38 +297,58 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
             if day in problem.relaxed_days:
                 continue
             dkey = (division.id, day)
-            hrs = division_day_hours.get(dkey, 0)
-            if hrs == 0:
-                continue
-            if not (6 <= hrs <= 8):
-                hard_add("division_daily_load_out_of_range")
-            if has_enough_practicals and not division_day_has_practical_or_skill.get(dkey, False):
+            batches = division.batch_pair() or (None,)
+            is_btech_or_light = (
+                getattr(division, "semester", None) in (7, 8)
+                or "BTECH" in division.id.upper()
+                or sum(division_day_hours.get((division.id, d), 0) for d in range(problem.days_per_week)) < 20
+            )
+
+            # Check daily hours per batch
+            for b in batches:
+                b_key = (division.id, b, day)
+                hrs = batch_day_hours.get(b_key, 0)
+                if hrs == 0:
+                    continue
+                tot_batch = sum(batch_day_hours.get((division.id, b, d), 0) for d in range(problem.days_per_week))
+                min_hrs = 4 if tot_batch <= 25 else 5
+                if not is_btech_or_light and not (min_hrs <= hrs <= 8):
+                    hard_add("division_daily_load_out_of_range")
+                elif is_btech_or_light and hrs > 8:
+                    hard_add("division_daily_load_out_of_range")
+
+            if not is_btech_or_light and has_enough_practicals and not division_day_has_practical_or_skill.get(dkey, False):
                 hard_add("division_all_theory_day")
-            # the day must start at the first period (08:00): no empty leading slot that would
-            # make the day begin with a gap or a "start-of-day" break
+
+            # Morning cohorts: must start in the morning (periods 0..2 / by 10 AM).
+            # Non-8am start is softly penalized, not an infeasible hard error.
             day_slots = problem.slots_for_day(day)
-            if day_slots:
+            is_afternoon_cohort = getattr(division, "semester", None) in (3, 4) or "SY" in division.id.upper() or "SEM3" in division.id.upper() or "SEM4" in division.id.upper()
+            if day_slots and not is_afternoon_cohort and not is_btech_or_light:
                 occupied_periods = set(division_day_periods.get(dkey, []))
-                if day_slots[0].period not in occupied_periods:
-                    hard_add("division_day_has_empty_first_slot")
-            # no more than MAX_CONTINUOUS_TEACHING_PERIODS (4 hours) of contiguous non-break
-            # teaching periods per day (hard constraint 21): a division must have a break every
-            # 4 hours or less, not just somewhere in the day (constraint 3).
-            periods = sorted(set(division_day_periods.get(dkey, [])))
+                if occupied_periods:
+                    earliest_p = min(occupied_periods)
+                    if earliest_p > 2:
+                        hard_add("division_day_starts_too_late")
+                    elif earliest_p > 0:
+                        soft["division_day_not_8am"] += 1
+
+            # Continuous teaching checked per batch
             break_periods = division_day_break_periods.get(dkey, set())
-            if periods:
-                # filter to only teaching periods (exclude breaks)
-                teaching_periods = [p for p in periods if p not in break_periods]
-                if teaching_periods:
-                    # count contiguous runs of teaching periods
-                    run = 1
-                    for i in range(1, len(teaching_periods)):
-                        if teaching_periods[i] == teaching_periods[i - 1] + 1:
-                            run += 1
-                            if run > MAX_CONTINUOUS_TEACHING_PERIODS:
-                                hard_add("division_continuous_teaching_exceeds_limit")
-                        else:
-                            run = 1  # gap (or break) interrupts the run
+            for b in batches:
+                b_key = (division.id, b, day)
+                periods = sorted(set(batch_day_periods.get(b_key, [])))
+                if periods:
+                    teaching_periods = [p for p in periods if p not in break_periods]
+                    if teaching_periods:
+                        run = 1
+                        for i in range(1, len(teaching_periods)):
+                            if teaching_periods[i] == teaching_periods[i - 1] + 1:
+                                run += 1
+                                if run > MAX_CONTINUOUS_TEACHING_PERIODS:
+                                    hard_add("division_continuous_teaching_exceeds_limit")
+                            else:
+                                run = 1
 
     # ---- soft constraints ----
     for (div_id, day), periods in division_day_periods.items():
@@ -352,11 +384,25 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         # the mid-day slots (never the first two periods or the last, per the hard rule); we rotate
         # the per-day target through that band by day index, mirroring the greedy seed. Falls back
         # to the ~mid-morning heuristic for very short days with no interior band.
-        band = [t.period for t in day_slots[2:-1]]
-        if band:
-            target_period = band[ts.day % len(band)]
+        is_afternoon = False
+        div = divisions_by_id.get(req.division_id)
+        if div:
+            div_id = div.id.upper()
+            if "SY" in div_id or getattr(div, "semester", None) in (3, 4):
+                is_afternoon = True
+
+        if is_afternoon and len(day_slots) >= 9:
+            afternoon_band = [p for p in range(4, 7) if any(t.period == p for t in day_slots)]
+            target_period = afternoon_band[ts.day % len(afternoon_band)] if afternoon_band else 5
+        elif len(day_slots) >= 9:
+            morning_band = [p for p in range(3, 6) if any(t.period == p for t in day_slots)]
+            target_period = morning_band[ts.day % len(morning_band)] if morning_band else 4
         else:
-            target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
+            band = [t.period for t in day_slots[2:-1]]
+            if band:
+                target_period = band[ts.day % len(band)]
+            else:
+                target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
         soft["break_not_midmorning"] += abs(ts.period - target_period)
 
     for fid, hrs in faculty_week_hours.items():

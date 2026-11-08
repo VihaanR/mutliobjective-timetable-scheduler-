@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session
+from webapp.auth import require_faculty
+from webapp.db import get_session
+from webapp.models_db import TimetableRun
+from engine.io_json import problem_from_dict
 from pydantic import BaseModel, Field
 
 from engine.models import ProblemInstance, Solution, SessionType, expand_requirements
@@ -111,7 +116,7 @@ def get_constraints_yaml():
 
 
 @router.put("/yaml")
-def update_constraints_yaml(body: UpdateYamlRequest):
+def update_constraints_yaml(body: UpdateYamlRequest, _: dict = Depends(require_faculty)):
     """Validate and update the declarative YAML constraints file."""
     try:
         parsed = save_academic_constraints_yaml(body.yaml)
@@ -140,10 +145,19 @@ def get_year_constraints(year_level: int):
 
 
 @router.post("/evaluate")
-def evaluate_constraint(body: ConstraintQuery):
-    """Evaluate natural language constraint feasibility."""
+def evaluate_constraint(
+    body: ConstraintQuery,
+    session: Session = Depends(get_session),
+    _: dict = Depends(require_faculty),
+):
+    """Evaluate natural language constraint feasibility against run snapshot if provided."""
     from engine.llm_constraints import evaluate_constraint_feasibility
-    return evaluate_constraint_feasibility(body.query, None)
+    problem = None
+    if body.run_id is not None:
+        run = session.get(TimetableRun, body.run_id)
+        if run and run.problem_snapshot:
+            problem = problem_from_dict(run.problem_snapshot)
+    return evaluate_constraint_feasibility(body.query, problem)
 
 
 # ------------------------------------------------------------------------------
@@ -301,8 +315,9 @@ def apply_academic_constraints(model, problem: ProblemInstance, candidates: dict
         fid = req.faculty_id.upper()
         valid_cands = candidates.get(req.id, [])
 
-        # Trupti Chandak (TC): Thu/Fri only, 10:00 - 16:00
-        if "TC" in fid or "TRUPTI" in fid:
+        # Trupti Chandak (TC): Thu/Fri only, 10:00 - 16:00 (for declared visiting subjects)
+        tc_subjects = set(tc_cfg.get("subjects", []))
+        if ("TC" in fid or "TRUPTI" in fid) and (not tc_subjects or req.course_code in tc_subjects):
             has_valid = any(
                 time_slots_by_id[c[0]].day in tc_days and (tc_start_hr <= 8 + time_slots_by_id[c[0]].period <= tc_end_hr)
                 for c in valid_cands
@@ -318,7 +333,7 @@ def apply_academic_constraints(model, problem: ProblemInstance, candidates: dict
                                 model.Add(var == 0)
                                 stats["rules_applied"] += 1
 
-        # Sonal Foss (SF): Afternoon/evening only (no morning before 12:00, period >= 4)
+        # Sonal Foss (SF): Afternoon/evening only (for declared visiting subjects or any assigned session)
         if "SF" in fid or "SONAL" in fid:
             has_afternoon = any(time_slots_by_id[c[0]].period >= 4 for c in valid_cands)
             if has_afternoon:
@@ -367,32 +382,51 @@ def apply_academic_constraints(model, problem: ProblemInstance, candidates: dict
                     if end_period >= 9:
                         six_pm_vars.append(var)
 
-            if eight_am_vars:
+            fac_div_ids = {r.division_id for r in f_reqs}
+            has_morning = any("SY" not in did.upper() and getattr(divisions_by_id.get(did), "semester", None) not in (3, 4) for did in fac_div_ids)
+            has_afternoon = any("SY" in did.upper() or getattr(divisions_by_id.get(did), "semester", None) in (3, 4) for did in fac_div_ids)
+
+            # Pigeonhole check: Only enforce hard >= 1 if number of target morning/afternoon faculty <= available slots
+            total_morning_divisions = len([d for d in divisions_by_id.values() if "SY" not in d.id.upper() and getattr(d, "semester", None) not in (3, 4)])
+            max_morning_slots = total_morning_divisions * problem.days_per_week
+            total_afternoon_divisions = len([d for d in divisions_by_id.values() if "SY" in d.id.upper() or getattr(d, "semester", None) in (3, 4)])
+            max_afternoon_slots = total_afternoon_divisions * problem.days_per_week
+
+            morning_fac_count = sum(1 for f_id, r_list in faculty_reqs.items() if any(tf in f_id.upper() for tf in target_faculty) and any("SY" not in r.division_id.upper() and getattr(divisions_by_id.get(r.division_id), "semester", None) not in (3, 4) for r in r_list))
+            afternoon_fac_count = sum(1 for f_id, r_list in faculty_reqs.items() if any(tf in f_id.upper() for tf in target_faculty) and any("SY" in r.division_id.upper() or getattr(divisions_by_id.get(r.division_id), "semester", None) in (3, 4) for r in r_list))
+
+            if eight_am_vars and has_morning and morning_fac_count <= max_morning_slots:
                 model.Add(sum(eight_am_vars) >= 1)
                 stats["rules_applied"] += 1
-            if six_pm_vars:
+            if six_pm_vars and has_afternoon and afternoon_fac_count <= max_afternoon_slots:
                 model.Add(sum(six_pm_vars) >= 1)
                 stats["rules_applied"] += 1
 
-    # 6. TY Elective Concurrency
+    # 6. TY Elective Concurrency: synchronize distinct elective courses at matching session index
     ty_cfg = year_rules.get("ty", {})
     e1_courses = {"TSA", "AAIA", "MIII"}
     e2_courses = {"CV", "ROBOTICS"}
 
-    e1_reqs = [r for r in requirements if r.course_code in e1_courses and r.session_type != SessionType.PRACTICAL]
-    if len(e1_reqs) >= 2:
-        # Define start slot expression for each theory session
-        slot_exprs = []
-        for req in e1_reqs:
-            cands = candidates.get(req.id, [])
-            if cands:
-                slot_exprs.append(sum(c[0] * x[(req.id, c[0], c[3])] for c in cands if (req.id, c[0], c[3]) in x))
-        # Synchronize first with the rest
-        if len(slot_exprs) >= 2:
-            base_slot = slot_exprs[0]
-            for expr in slot_exprs[1:]:
-                model.Add(base_slot == expr)
-                stats["rules_applied"] += 1
+    for grp_courses in [e1_courses, e2_courses]:
+        grp_reqs = [r for r in requirements if r.course_code.split("::")[-1] in grp_courses and r.session_type != SessionType.PRACTICAL]
+        by_course: dict[str, list] = {}
+        for req in grp_reqs:
+            code = req.course_code.split("::")[-1]
+            by_course.setdefault(code, []).append(req)
+        if len(by_course) >= 2:
+            c_lists = list(by_course.values())
+            base_reqs = c_lists[0]
+            for other_reqs in c_lists[1:]:
+                for k in range(min(len(base_reqs), len(other_reqs))):
+                    r1 = base_reqs[k]
+                    r2 = other_reqs[k]
+                    cands1 = candidates.get(r1.id, [])
+                    cands2 = candidates.get(r2.id, [])
+                    if cands1 and cands2:
+                        expr1 = sum(c[0] * x[(r1.id, c[0], c[3])] for c in cands1 if (r1.id, c[0], c[3]) in x)
+                        expr2 = sum(c[0] * x[(r2.id, c[0], c[3])] for c in cands2 if (r2.id, c[0], c[3]) in x)
+                        model.Add(expr1 == expr2)
+                        stats["rules_applied"] += 1
 
     # 7. Multi-Session Labs (e.g. Web Engineering Lab: 4h/week -> 2h x 2 separate sessions)
     # Ensure at most 1 lab session of the same course per batch per day (non-consecutive / separate days)

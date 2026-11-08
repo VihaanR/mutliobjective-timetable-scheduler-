@@ -1,0 +1,518 @@
+{
+  "institution": "Dwarkadas J. Sanghvi College of Engineering (DJSCE), Dept. of CSE (Data Science)",
+  "class_term": "BTech (Final Year), Semester VIII, Divisions D1/D2, academic term January-May 2027",
+  "department": "CSE-DS",
+  "department_name": "Computer Science & Engineering (Data Science)",
+  "year_label": "BTech",
+  "year_name": "Final Year",
+  "semester": 8,
+  "days_per_week": 5,
+  "time_slots": [
+    {
+      "id": 0,
+      "day": 0,
+      "period": 0,
+      "start": "08:00",
+      "end": "09:00"
+    },
+    {
+      "id": 1,
+      "day": 0,
+      "period": 1,
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "id": 2,
+      "day": 0,
+      "period": 2,
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "id": 3,
+      "day": 0,
+      "period": 3,
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "id": 4,
+      "day": 0,
+      "period": 4,
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "id": 5,
+      "day": 0,
+      "period": 5,
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "id": 6,
+      "day": 0,
+      "period": 6,
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "id": 7,
+      "day": 0,
+      "period": 7,
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "id": 8,
+      "day": 1,
+      "period": 0,
+      "start": "08:00",
+      "end": "09:00"
+    },
+    {
+      "id": 9,
+      "day": 1,
+      "period": 1,
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "id": 10,
+      "day": 1,
+      "period": 2,
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "id": 11,
+      "day": 1,
+      "period": 3,
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "id": 12,
+      "day": 1,
+      "period": 4,
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "id": 13,
+      "day": 1,
+      "period": 5,
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "id": 14,
+      "day": 1,
+      "period": 6,
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "id": 15,
+      "day": 1,
+      "period": 7,
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "id": 16,
+      "day": 2,
+      "period": 0,
+      "start": "08:00",
+      "end": "09:00"
+    },
+    {
+      "id": 17,
+      "day": 2,
+      "period": 1,
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "id": 18,
+      "day": 2,
+      "period": 2,
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "id": 19,
+      "day": 2,
+      "period": 3,
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "id": 20,
+      "day": 2,
+      "period": 4,
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "id": 21,
+      "day": 2,
+      "period": 5,
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "id": 22,
+      "day": 2,
+      "period": 6,
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "id": 23,
+      "day": 2,
+      "period": 7,
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "id": 24,
+      "day": 3,
+      "period": 0,
+      "start": "08:00",
+      "end": "09:00"
+    },
+    {
+      "id": 25,
+      "day": 3,
+      "period": 1,
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "id": 26,
+      "day": 3,
+      "period": 2,
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "id": 27,
+      "day": 3,
+      "period": 3,
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "id": 28,
+      "day": 3,
+      "period": 4,
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "id": 29,
+      "day": 3,
+      "period": 5,
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "id": 30,
+      "day": 3,
+      "period": 6,
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "id": 31,
+      "day": 3,
+      "period": 7,
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "id": 32,
+      "day": 4,
+      "period": 0,
+      "start": "08:00",
+      "end": "09:00"
+    },
+    {
+      "id": 33,
+      "day": 4,
+      "period": 1,
+      "start": "09:00",
+      "end": "10:00"
+    },
+    {
+      "id": 34,
+      "day": 4,
+      "period": 2,
+      "start": "10:00",
+      "end": "11:00"
+    },
+    {
+      "id": 35,
+      "day": 4,
+      "period": 3,
+      "start": "11:00",
+      "end": "12:00"
+    },
+    {
+      "id": 36,
+      "day": 4,
+      "period": 4,
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "id": 37,
+      "day": 4,
+      "period": 5,
+      "start": "13:00",
+      "end": "14:00"
+    },
+    {
+      "id": 38,
+      "day": 4,
+      "period": 6,
+      "start": "14:00",
+      "end": "15:00"
+    },
+    {
+      "id": 39,
+      "day": 4,
+      "period": 7,
+      "start": "15:00",
+      "end": "16:00"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "CR51",
+      "name": "Classroom 51 (5th Floor, CSE-DS Dept)",
+      "capacity": 70,
+      "room_type": "classroom"
+    },
+    {
+      "id": "CR52",
+      "name": "Classroom 52 (5th Floor, CSE-DS Dept)",
+      "capacity": 70,
+      "room_type": "classroom"
+    },
+    {
+      "id": "CR53",
+      "name": "Classroom 53 (5th Floor, CSE-DS Dept)",
+      "capacity": 70,
+      "room_type": "classroom"
+    },
+    {
+      "id": "CR46",
+      "name": "Classroom 46 (4th Floor, CSE-DS Dept)",
+      "capacity": 70,
+      "room_type": "classroom"
+    },
+    {
+      "id": "L1",
+      "name": "Data Analytics Lab (5th Floor, CSE-DS Dept)",
+      "capacity": 35,
+      "room_type": "lab"
+    },
+    {
+      "id": "L2",
+      "name": "Machine Learning Lab (5th Floor, CSE-DS Dept)",
+      "capacity": 35,
+      "room_type": "lab"
+    },
+    {
+      "id": "L3",
+      "name": "Computer Vision Lab (5th Floor, CSE-DS Dept)",
+      "capacity": 35,
+      "room_type": "lab"
+    },
+    {
+      "id": "L4",
+      "name": "High Performance Computing Lab (5th Floor, CSE-DS Dept)",
+      "capacity": 35,
+      "room_type": "lab"
+    }
+  ],
+  "faculty": [
+    {
+      "id": "NM",
+      "name": "Dr. Nilesh Marathe"
+    },
+    {
+      "id": "KRS",
+      "name": "Dr. Kriti Srivastava"
+    },
+    {
+      "id": "AB",
+      "name": "Alisha Bann"
+    },
+    {
+      "id": "MD",
+      "name": "Mangal Dandekar"
+    },
+    {
+      "id": "NP",
+      "name": "Dr. Namita Pulgam"
+    },
+    {
+      "id": "PSJ",
+      "name": "Pradnya Joshi"
+    },
+    {
+      "id": "PP",
+      "name": "Pradnya Patil"
+    },
+    {
+      "id": "KT",
+      "name": "Dr. Khushbu Trehan"
+    },
+    {
+      "id": "PT",
+      "name": "Pradeep Talwalkar"
+    },
+    {
+      "id": "AVG",
+      "name": "Ashwini Garule"
+    },
+    {
+      "id": "MAA",
+      "name": "Mrudul Arkadi"
+    },
+    {
+      "id": "SAM",
+      "name": "Samiran Maity"
+    },
+    {
+      "id": "SSM",
+      "name": "Shraddha More"
+    },
+    {
+      "id": "AG",
+      "name": "Dr. Ajitkumar Gudekar"
+    },
+    {
+      "id": "RP",
+      "name": "Ruchika Patil"
+    },
+    {
+      "id": "GW",
+      "name": "Govind Wakure"
+    },
+    {
+      "id": "SF",
+      "name": "Sonal Fosa"
+    },
+    {
+      "id": "MA",
+      "name": "Michael Amiral"
+    },
+    {
+      "id": "AR",
+      "name": "Aditi Punit"
+    },
+    {
+      "id": "KD",
+      "name": "Kanchan Dabre"
+    },
+    {
+      "id": "ND",
+      "name": "Dr. Niti Desai (Visiting Faculty)"
+    }
+  ],
+  "courses": [
+    {
+      "code": "Data_Ethics",
+      "title": "Data Ethics",
+      "credits": 4,
+      "category": "Major",
+      "theory_sessions_per_week": 3,
+      "practical_sessions_per_week": 0,
+      "tutorial_sessions_per_week": 1,
+      "is_heavy": false
+    },
+    {
+      "code": "HPC",
+      "title": "High Performance Computing Lab",
+      "credits": 1,
+      "category": "Major",
+      "theory_sessions_per_week": 0,
+      "practical_sessions_per_week": 1,
+      "tutorial_sessions_per_week": 0,
+      "is_heavy": false
+    },
+    {
+      "code": "Green_DS",
+      "title": "Green Data Science",
+      "credits": 3,
+      "category": "Major",
+      "theory_sessions_per_week": 3,
+      "practical_sessions_per_week": 0,
+      "tutorial_sessions_per_week": 0,
+      "is_heavy": false
+    },
+    {
+      "code": "ARC",
+      "title": "Academic Research",
+      "credits": 1,
+      "category": "Major",
+      "theory_sessions_per_week": 1,
+      "practical_sessions_per_week": 0,
+      "tutorial_sessions_per_week": 0,
+      "is_heavy": false
+    }
+  ],
+  "divisions": [
+    {
+      "id": "D1",
+      "program": "FYUP",
+      "semester": 8,
+      "student_count": 70,
+      "batches": [
+        "D11",
+        "D12"
+      ],
+      "course_codes": [
+        "Data_Ethics",
+        "HPC",
+        "Green_DS",
+        "ARC"
+      ],
+      "faculty_by_course": {
+        "Data_Ethics": "AS",
+        "HPC": [
+          "NM",
+          "AR",
+          "NM"
+        ],
+        "Green_DS": "GW",
+        "ARC": "PP"
+      }
+    },
+    {
+      "id": "D2",
+      "program": "FYUP",
+      "semester": 8,
+      "student_count": 70,
+      "batches": [
+        "D21",
+        "D22"
+      ],
+      "course_codes": [
+        "Green_DS",
+        "ARC",
+        "Data_Ethics"
+      ],
+      "faculty_by_course": {
+        "Green_DS": "GW",
+        "ARC": "AS",
+        "Data_Ethics": "AS"
+      }
+    }
+  ]
+}

@@ -54,7 +54,12 @@ def get_upload_dir() -> Path:
     from the upload endpoint and from webapp/server.py's startup lifespan to ensure the directory
     exists (it does not ship in the repo - CLAUDE.md §15)."""
     override = os.environ.get("TIMETABLE_UPLOADS_PATH")
-    d = Path(override) if override else Path(__file__).resolve().parent.parent / "uploads"
+    if override:
+        d = Path(override)
+    elif os.environ.get("VERCEL"):
+        d = Path("/tmp/uploads")
+    else:
+        d = Path(__file__).resolve().parent.parent / "uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

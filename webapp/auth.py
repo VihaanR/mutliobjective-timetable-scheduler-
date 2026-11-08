@@ -22,6 +22,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 from typing import Literal
@@ -33,14 +34,21 @@ from webapp.db import get_session
 from webapp.models_db import AppSecret, Faculty
 
 SESSION_COOKIE = "tt_session"
+ACCESS_TOKEN_COOKIE = "access_token"
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
 # Development fallback used by the README/login screen for a first-run sample teacher account.
+ALLOW_DEV_FALLBACK = os.environ.get("TIMETABLE_DEV_MODE", "1").lower() in ("1", "true")
 DEV_SAMPLE_FACULTY_CODE = "NM"
 DEV_SAMPLE_EMAIL = "nilesh.marathe@djsce.edu.in"
 DEV_SAMPLE_PASSWORD = "Timetable@123"
 
-Role = Literal["faculty", "student"]
+# Dev admin sample credentials (documented on login.html & R1)
+DEV_ADMIN_FACULTY_CODE = "ADMIN"
+DEV_ADMIN_EMAIL = "admin@djsce.ac.in"
+DEV_ADMIN_PASSWORD = "devpass123"
+
+Role = Literal["faculty", "student", "admin"]
 
 _SCRYPT_PARAMS = dict(n=2**14, r=8, p=1, dklen=32)
 
@@ -64,8 +72,18 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(digest, expected)
 
 
+def is_dev_sample_credentials(email: str, password: str) -> bool:
+    clean_email = email.strip().lower()
+    return (
+        (clean_email == DEV_SAMPLE_EMAIL.lower() and password == DEV_SAMPLE_PASSWORD)
+        or (clean_email == DEV_ADMIN_EMAIL.lower() and password == DEV_ADMIN_PASSWORD)
+    )
+
+
 def matches_dev_sample_teacher_credentials(email: str, password: str) -> bool:
-    return email == DEV_SAMPLE_EMAIL and password == DEV_SAMPLE_PASSWORD
+    if not ALLOW_DEV_FALLBACK:
+        return False
+    return is_dev_sample_credentials(email, password)
 
 
 def get_secret(session: Session) -> str:
@@ -106,10 +124,22 @@ def verify_session_token(token: str, secret: str) -> dict | None:
 
 
 def get_current_principal(request: Request, session: Session = Depends(get_session)) -> dict | None:
-    """Reads/verifies the `tt_session` cookie. Returns `{"role", "id"}` or `None` - never raises,
-    so callers decide whether the route requires a login at all (see `require_faculty`/
-    `require_student` below, and the page-level guards in `webapp/server.py`)."""
-    token = request.cookies.get(SESSION_COOKIE)
+    """Reads/verifies authentication token from:
+    1. Cookie: `access_token`
+    2. Cookie: `tt_session`
+    3. Header: `Authorization: Bearer <token>` or `Authorization: <token>`
+
+    Returns `{"role": ..., "id": ...}` or `None` - never raises,
+    so callers decide whether the route requires a login at all.
+    """
+    token = request.cookies.get(ACCESS_TOKEN_COOKIE) or request.cookies.get(SESSION_COOKIE)
+    if not token:
+        auth_hdr = request.headers.get("Authorization") or request.headers.get("authorization")
+        if auth_hdr:
+            if auth_hdr.lower().startswith("bearer "):
+                token = auth_hdr[7:].strip()
+            else:
+                token = auth_hdr.strip()
     if not token:
         return None
     secret = get_secret(session)
@@ -122,7 +152,7 @@ def get_current_principal(request: Request, session: Session = Depends(get_sessi
 def require_faculty(principal: dict | None = Depends(get_current_principal)) -> dict:
     if principal is None:
         raise HTTPException(status_code=401, detail="login required")
-    if principal["role"] != "faculty":
+    if principal["role"] not in ("faculty", "admin"):
         raise HTTPException(status_code=403, detail="teacher access required")
     return principal
 

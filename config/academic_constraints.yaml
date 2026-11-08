@@ -64,7 +64,7 @@ faculty_rules:
     SF: # Ms. Sonal Foss
       name: "Ms. Sonal Foss"
       role: "Visiting Faculty"
-      subjects: ["QPM_Theory"]
+      subjects: ["QPM", "QPM_Theory"]
       divisions: ["D1", "D3"]
       timing: "afternoon_evening_only" # No morning sessions (Period >= 4, after 12:00)
       max_consecutive_lectures: 2      # Up to 2 back-to-back lectures allowed

@@ -21,7 +21,16 @@ def _default_url() -> str:
     # env override lets tests / alternate deployments point elsewhere without code changes
     override = os.environ.get("TIMETABLE_DB_PATH")
     if override:
+        target_path = Path(override)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{override}"
+    if os.environ.get("VERCEL"):
+        tmp_db = Path("/tmp/platform.db")
+        tmp_db.parent.mkdir(parents=True, exist_ok=True)
+        if not tmp_db.exists() and DEFAULT_DB_PATH.exists():
+            import shutil
+            shutil.copy2(DEFAULT_DB_PATH, tmp_db)
+        return f"sqlite:///{tmp_db}"
     DATA_DIR.mkdir(parents=True, exist_ok=True)  # allowed write location (CLAUDE.md §15)
     return f"sqlite:///{DEFAULT_DB_PATH}"
 
@@ -57,6 +66,8 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "candidate_solutions": "JSON",
         "judge_reports": "JSON",
         "selected_candidate_idx": "INTEGER DEFAULT 0",
+        "pinned_session_ids": "JSON",
+        "lifecycle_status": "VARCHAR DEFAULT 'draft'",
     },
     "faculty": {
         "is_visiting": "BOOLEAN DEFAULT 0",

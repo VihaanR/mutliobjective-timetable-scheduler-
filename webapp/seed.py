@@ -34,8 +34,10 @@ REFERENCE_DIR = Path(__file__).resolve().parent.parent / "data" / "reference"
 # name -> (dataset filename stem, branch code). The original single-branch bootstrap stays at its
 # original URL for backward compatibility; every other year/program gets its own dataset name.
 KNOWN_DATASETS: dict[str, tuple[str, str]] = {
-    # Jan-May 2026 (even semester) -- the original DJSCE reference dataset
+    # Jan-May 2026/2027 (even semester) -- DJSCE reference datasets
     "reference": ("djsce_cse_ds_sy_sem4", "CSE-DS-SY-SEM4"),
+    "ty-sem6": ("djsce_ty_sem6_even_2027", "CSE-DS-TY-SEM6"),
+    "btech-sem8": ("djsce_btech_sem8_even_2027", "CSE-DS-BTECH-SEM8"),
     # July-Dec 2026 (odd semester) -- 2nd/3rd/final year, transcribed from photographed sheets
     "sy-sem3": ("djsce_sy_sem3_jul_dec_2026", "CSE-DS-SY-SEM3"),
     "ty-sem5": ("djsce_ty_d1_sem5_jul_dec_2026", "CSE-DS-TY-SEM5"),
@@ -143,7 +145,7 @@ def _seed_dataset(session: Session, data: dict, branch_code: str, force: bool) -
     for r in data["rooms"]:
         _upsert_room(session, room_cache, r["id"], r["name"], r["capacity"], r["room_type"])
 
-    faculty_cache: dict[str, Faculty] = {}
+    faculty_cache: dict[str, Faculty] = {f.code: f for f in session.exec(select(Faculty)).all()}
     for f in data["faculty"]:
         _upsert_faculty(session, faculty_cache, f["id"], f["name"], f.get("unavailable_slots", []))
 
@@ -184,10 +186,21 @@ def _seed_dataset(session: Session, data: dict, branch_code: str, force: bool) -
                 continue
             alloc = Allocation(division_id=division.id, course_id=course.id)
             if isinstance(value, list):
-                b1 = faculty_cache.get(value[0])
-                b2 = faculty_cache.get(value[1])
-                alloc.batch1_faculty_id = b1.id if b1 else None
-                alloc.batch2_faculty_id = b2.id if b2 else None
+                if len(value) >= 3:
+                    fac = faculty_cache.get(value[0])
+                    b1 = faculty_cache.get(value[1])
+                    b2 = faculty_cache.get(value[2])
+                    alloc.faculty_id = fac.id if fac else None
+                    alloc.batch1_faculty_id = b1.id if b1 else None
+                    alloc.batch2_faculty_id = b2.id if b2 else None
+                elif len(value) == 2:
+                    b1 = faculty_cache.get(value[0])
+                    b2 = faculty_cache.get(value[1])
+                    alloc.batch1_faculty_id = b1.id if b1 else None
+                    alloc.batch2_faculty_id = b2.id if b2 else None
+                elif len(value) == 1:
+                    fac = faculty_cache.get(value[0])
+                    alloc.faculty_id = fac.id if fac else None
             else:
                 fac = faculty_cache.get(value)
                 alloc.faculty_id = fac.id if fac else None

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>University Timetable Solver — Evolution Viewer</title>
     <link rel="stylesheet" href="/static/styles.css?v=20261002_evo">
+    <script src="/static/icons.js"></script>
 </head>
 <body>
     <header class="navbar">
@@ -25,8 +26,8 @@
             <button class="tab-btn" data-tab="classrooms">Classrooms</button>
             <button class="tab-btn" data-tab="labs">Labs</button>
             <button class="tab-btn" data-tab="stats">Stats</button>
-            <button class="tab-btn active" data-tab="evolution" id="tabBtnEvolution">
-                ⚡ Evolution <span class="tab-badge" id="sidebarStepsBadge">19</span>
+            <button class="tab-btn active" data-tab="evolution" id="tabBtnEvolution" style="display:inline-flex; align-items:center; gap:6px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Evolution <span class="tab-badge" id="sidebarStepsBadge">19</span>
             </button>
         </aside>
 
@@ -63,22 +64,24 @@
                 <!-- Section 2: Line Chart (Middle) -->
                 <section class="chart-section">
                     <div class="chart-header">
-                        <h2 class="chart-title">📈 Objective Score Improvement over Steps</h2>
+                        <h2 class="chart-title" style="display:inline-flex; align-items:center; gap:8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg> Objective Score Improvement over Steps
+                        </h2>
                         <div class="chart-legend">
                             <span class="legend-item">
-                                <span class="legend-line" style="background:#4A2C17;"></span>
-                                <span class="legend-dot" style="background:#4A2C17;"></span>
-                                <span>Total Penalty (#4A2C17)</span>
+                                <span class="legend-line" style="background:#003877;"></span>
+                                <span class="legend-dot" style="background:#003877;"></span>
+                                <span>Total Penalty (#003877)</span>
                             </span>
                             <span class="legend-item">
-                                <span class="legend-line" style="background:#6B4226;"></span>
-                                <span class="legend-dot" style="background:#6B4226;"></span>
-                                <span>Faculty Score (#6B4226)</span>
+                                <span class="legend-line" style="background:#f26d21;"></span>
+                                <span class="legend-dot" style="background:#f26d21;"></span>
+                                <span>Faculty Score (#f26d21)</span>
                             </span>
                             <span class="legend-item">
-                                <span class="legend-line" style="background:#C8A97E;"></span>
-                                <span class="legend-dot" style="background:#C8A97E;"></span>
-                                <span>Student Score (#C8A97E)</span>
+                                <span class="legend-line" style="background:#0284c7;"></span>
+                                <span class="legend-dot" style="background:#0284c7;"></span>
+                                <span>Student Score (#0284c7)</span>
                             </span>
                         </div>
                     </div>
@@ -96,9 +99,15 @@
                     </div>
                     <div class="controls-actions">
                         <div class="btn-group">
-                            <button type="button" class="ctrl-btn primary" id="autoPlayBtn">▶ Play</button>
-                            <button type="button" class="ctrl-btn" id="prevStepBtn">◀ Prev</button>
-                            <button type="button" class="ctrl-btn" id="nextStepBtn">Next ▶</button>
+                            <button type="button" class="ctrl-btn primary" id="autoPlayBtn" style="display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> Play
+                            </button>
+                            <button type="button" class="ctrl-btn" id="prevStepBtn" style="display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg> Prev
+                            </button>
+                            <button type="button" class="ctrl-btn" id="nextStepBtn" style="display:inline-flex; align-items:center; justify-content:center; gap:6px;">
+                                Next <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            </button>
                         </div>
                         <div class="step-info-bar" id="stepInfoBar">
                             <span class="badge" id="stepBadge">Step 19</span>
@@ -108,7 +117,7 @@
                             <span>|</span>
                             <span>Resource: <b id="infoResource">3</b></span>
                             <span>|</span>
-                            <span>Total: <b id="infoTotal" style="color:#4A2C17;">43</b></span>
+                            <span>Total: <b id="infoTotal" style="color:#003877;">43</b></span>
                             <span>|</span>
                             <span>Time: <b id="infoTime">11.73s</b></span>
                             <span class="delta-badge" id="infoDelta">-5 from previous</span>
@@ -120,7 +129,9 @@
                 <section class="grid-section">
                     <div class="grid-header">
                         <div class="grid-title-wrap">
-                            <h2 class="grid-title">📅 Division Timetable Grid</h2>
+                            <h2 class="grid-title" style="display:inline-flex; align-items:center; gap:8px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg> Division Timetable Grid
+                            </h2>
                             <select id="divisionSelect" class="dropdown-div">
                                 <option value="D1">Division D1 (Class-D1)</option>
                                 <option value="D2">Division D2 (Class-D2)</option>
@@ -503,16 +514,16 @@
                 });
             }
 
-            // Draw 3 lines: Total Penalty (#4A2C17), Faculty (#6B4226), Student (#C8A97E)
-            drawSeries("student_score", "#C8A97E", 2.2);
-            drawSeries("faculty_score", "#6B4226", 2.2);
-            drawSeries("total_penalty", "#4A2C17", 3.2);
+            // Draw 3 lines: Total Penalty (#003877), Faculty (#f26d21), Student (#0284c7)
+            drawSeries("student_score", "#0284c7", 2.2);
+            drawSeries("faculty_score", "#f26d21", 2.2);
+            drawSeries("total_penalty", "#003877", 3.2);
 
             // Highlight selected step column
             const selX = getX(currentStepIndex);
             ctx.save();
             ctx.setLineDash([4, 4]);
-            ctx.strokeStyle = "rgba(74, 44, 23, 0.4)";
+            ctx.strokeStyle = "rgba(0, 56, 119, 0.4)";
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.moveTo(selX, padding.top);
@@ -524,7 +535,7 @@
             const selTotY = getY(evolutionSteps[currentStepIndex].total_penalty);
             ctx.beginPath();
             ctx.arc(selX, selTotY, 9, 0, Math.PI * 2);
-            ctx.strokeStyle = "#4A2C17";
+            ctx.strokeStyle = "#003877";
             ctx.lineWidth = 2.5;
             ctx.stroke();
         }
@@ -607,7 +618,7 @@
 
         function startAutoPlay() {
             isPlaying = true;
-            autoPlayBtn.textContent = "⏸ Pause";
+            autoPlayBtn.innerHTML = (window.Icons ? window.Icons.get("pause", { size: 14 }) : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>') + ' Pause';
             autoPlayBtn.style.background = "#c62828";
 
             // If already at the end, restart from step 1
@@ -634,7 +645,7 @@
                 clearInterval(playInterval);
                 playInterval = null;
             }
-            autoPlayBtn.textContent = "▶ Play";
+            autoPlayBtn.innerHTML = (window.Icons ? window.Icons.get("play", { size: 14 }) : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>') + ' Play';
             autoPlayBtn.style.background = "";
         }
 

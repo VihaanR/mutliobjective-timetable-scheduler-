@@ -123,8 +123,21 @@ def build_candidates(problem: ProblemInstance,
                 if occ_ids is None:
                     continue
                 # break must sit in the mid-day band: not first two periods, not last period
-                if req.is_break and (start_idx <= 1 or start_idx == len(day_slots) - 1):
-                    continue
+                if req.is_break:
+                    if start_idx <= 1 or start_idx == len(day_slots) - 1:
+                        continue
+                    if len(day_slots) >= 9:
+                        is_afternoon = False
+                        if division:
+                            div_id = division.id.upper()
+                            if "SY" in div_id or getattr(division, "semester", None) in (3, 4):
+                                is_afternoon = True
+                        if is_afternoon:
+                            if ts.period < 4 or ts.period > 7:
+                                continue
+                        else:
+                            if ts.period < 3 or ts.period > 6:
+                                continue
                 # Open Elective must sit at the start of day (period 0) or end of day (period >= 5)
                 if is_oe and ts.period != 0 and ts.period < 5:
                     continue

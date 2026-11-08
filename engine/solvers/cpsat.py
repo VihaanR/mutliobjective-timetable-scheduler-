@@ -209,23 +209,22 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 else:
                     _accumulate(batch_terms, (req.division_id, req.batch_id, sid), var)
 
-    # teaching-only occupancy (excludes breaks) per (division_id, slot_id), for the
-    # continuous-teaching limit (constraint 21). Batch-pair labs are counted once via the
-    # first-seen half (the batch-pair same-slot equality constraint guarantees the other half
-    # is 1 at exactly the same slot).
-    division_teaching_terms: dict = {}
-    seen_teaching_groups: set[str] = set()
+    # teaching-only occupancy (excludes breaks) per (division_id, batch_id, slot_id), for the
+    # continuous-teaching limit (constraint 21). Tracks real student-level continuous load.
+    batch_teaching_terms: dict = {}
     for req in requirements:
         if req.is_break:
             continue
-        if req.batch_group_id:
-            if req.batch_group_id in seen_teaching_groups:
-                continue
-            seen_teaching_groups.add(req.batch_group_id)
+        division = divisions_by_id.get(req.division_id)
+        batches = division.batch_pair() if division else ()
         for (start_id, occ_ids, day, room_id) in candidates[req.id]:
             var = x[(req.id, start_id, room_id)]
             for sid in occ_ids:
-                _accumulate(division_teaching_terms, (req.division_id, sid), var)
+                if req.batch_id is None:
+                    for b in batches:
+                        _accumulate(batch_teaching_terms, (req.division_id, b, sid), var)
+                else:
+                    _accumulate(batch_teaching_terms, (req.division_id, req.batch_id, sid), var)
 
     for vars_ in room_terms.values():
         model.AddAtMostOne(vars_)
@@ -304,60 +303,102 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 if window_terms:
                     model.Add(sum(window_terms) <= cap)
 
-    # division daily load in [6, 8] hours (batch pairs counted once)
-    seen_groups2: set[str] = set()
-    div_day_terms: dict = {}
+    # division/batch daily load in [5, 8] hours (per-batch student load)
+    batch_day_terms: dict = {}
+    batch_total_load: dict[tuple[str, str], int] = {}
     for req in requirements:
         if req.is_break:
             continue
-        if req.batch_group_id:
-            if req.batch_group_id in seen_groups2:
-                continue
-            seen_groups2.add(req.batch_group_id)
+        division = divisions_by_id.get(req.division_id)
+        batches = division.batch_pair() if division else ()
+        if req.batch_id is None:
+            for b in batches:
+                batch_total_load[(req.division_id, b)] = batch_total_load.get((req.division_id, b), 0) + req.duration_slots
+        else:
+            batch_total_load[(req.division_id, req.batch_id)] = batch_total_load.get((req.division_id, req.batch_id), 0) + req.duration_slots
         for (start_id, _occ, day, room_id) in candidates[req.id]:
             var = x[(req.id, start_id, room_id)]
-            div_day_terms.setdefault((req.division_id, day), []).append((var, req.duration_slots))
+            if req.batch_id is None:
+                for b in batches:
+                    batch_day_terms.setdefault((req.division_id, b, day), []).append((var, req.duration_slots))
+            else:
+                batch_day_terms.setdefault((req.division_id, req.batch_id, day), []).append((var, req.duration_slots))
     # a relaxed (disrupted) day is exempt from the day-shaped hard rules -- see scoring.py
     relaxed = problem.relaxed_days
-    for (division_id, day), terms in div_day_terms.items():
+    unrelaxed_days_count = len([d for d in range(problem.days_per_week) if d not in relaxed])
+    for (division_id, batch_id, day), terms in batch_day_terms.items():
         if day in relaxed:
             continue
         expr = sum(v * d for v, d in terms)
-        model.Add(expr >= 6)
+        tot = batch_total_load.get((division_id, batch_id), 0)
+        div_obj = divisions_by_id.get(division_id)
+        is_light_cohort = tot < (4 * max(1, unrelaxed_days_count)) or getattr(div_obj, "semester", None) in (7, 8) or "BTECH" in division_id.upper()
+        if not is_light_cohort:
+            min_daily_hours = 4 if tot <= 25 else 5
+            model.Add(expr >= min_daily_hours)
         model.Add(expr <= 8)
 
     # no more than MAX_CONTINUOUS_TEACHING_PERIODS (4 hours) of contiguous non-break teaching
-    # periods per division per day (hard constraint 21): for every window of (cap+1) consecutive
-    # periods in a day, at most `cap` may be busy with teaching sessions
-    for division_id in {r.division_id for r in requirements}:
-        for day, day_slots in days.items():
-            if day in relaxed:
-                continue
-            cap = MAX_CONTINUOUS_TEACHING_PERIODS
-            for start in range(len(day_slots) - cap):
-                window = day_slots[start:start + cap + 1]
-                window_terms = []
-                for ts in window:
-                    window_terms.extend(division_teaching_terms.get((division_id, ts.id), []))
-                if window_terms:
-                    model.Add(sum(window_terms) <= cap)
+    # periods per division/batch per day (hard constraint 21): for every window of (cap+1) consecutive
+    # periods in a day, at most `cap` may be busy with teaching sessions for any student batch
+    for division in problem.divisions:
+        batches = division.batch_pair()
+        for b in batches:
+            for day, day_slots in days.items():
+                if day in relaxed:
+                    continue
+                cap = MAX_CONTINUOUS_TEACHING_PERIODS
+                for start in range(len(day_slots) - cap):
+                    window = day_slots[start:start + cap + 1]
+                    window_terms = []
+                    for ts in window:
+                        window_terms.extend(batch_teaching_terms.get((division.id, b, ts.id), []))
+                    if window_terms:
+                        model.Add(sum(window_terms) <= cap)
 
-    # each division's day must START at the first period (08:00) -- no empty leading slot
+    # each division's day must START in the morning (periods 0..2)
+    # 08:00 start is preferred with high weight, not an infeasible hard ban on 9 AM
     first_slot_id_by_day = {day: ds[0].id for day, ds in days.items() if ds}
+    morning_slot_ids_by_day = {day: {s.id for s in ds[:3]} for day, ds in days.items() if ds}
     first_slot_terms: dict = {}
+    morning_slot_terms: dict = {}
     for req in requirements:
         if req.is_break:
             continue
         for (start_id, _occ, day, room_id) in candidates[req.id]:
             if start_id == first_slot_id_by_day.get(day):
                 first_slot_terms.setdefault((req.division_id, day), []).append(x[(req.id, start_id, room_id)])
+            if start_id in morning_slot_ids_by_day.get(day, set()):
+                morning_slot_terms.setdefault((req.division_id, day), []).append(x[(req.id, start_id, room_id)])
+
+    # Check which divisions are afternoon shift (SY / Sem 3 / Sem 4)
+    afternoon_div_ids = set()
+    for d in problem.divisions:
+        if "SY" in d.id.upper() or getattr(d, "semester", None) in (3, 4):
+            afternoon_div_ids.add(d.id)
+
+    missing_8am_unscaled = []
     for division in problem.divisions:
+        if division.id in afternoon_div_ids:
+            continue
+        is_btech_or_light = getattr(division, "semester", None) in (7, 8) or "BTECH" in division.id.upper()
+        if is_btech_or_light:
+            continue
         for day in days:
             if day in relaxed:
                 continue
-            terms = first_slot_terms.get((division.id, day), [])
-            if terms:
-                model.Add(sum(terms) >= 1)
+            m_terms = morning_slot_terms.get((division.id, day), [])
+            if m_terms:
+                model.Add(sum(m_terms) >= 1)
+            f_terms = first_slot_terms.get((division.id, day), [])
+            if f_terms:
+                has_8am = model.NewBoolVar(f"has_8am_{division.id}_{day}")
+                model.Add(sum(f_terms) >= 1).OnlyEnforceIf(has_8am)
+                model.Add(sum(f_terms) == 0).OnlyEnforceIf(has_8am.Not())
+                miss_var = model.NewBoolVar(f"miss_8am_{division.id}_{day}")
+                model.Add(miss_var == 1).OnlyEnforceIf(has_8am.Not())
+                model.Add(miss_var == 0).OnlyEnforceIf(has_8am)
+                missing_8am_unscaled.append(miss_var)
 
     # division occupancy (teaching sessions + breaks) for idle gap minimization
     division_all_terms: dict = {}
@@ -465,16 +506,27 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
                 if len(day_slots) >= 2 and ts.period in {day_slots[-1].period, day_slots[-2].period}:
                     lab_unscaled.append(var)
             if req.is_break:
-                # vary the target across days (rotate through the legal mid-day band by day
-                # index) so breaks spread over the week instead of all landing on one period --
-                # mirrors scoring.py's break_not_midmorning term
                 day_slots = days[day]
                 ts = next(t for t in day_slots if t.id == start_id)
-                band = [t.period for t in day_slots[2:-1]]
-                if band:
-                    target_period = band[day % len(band)]
+                division = divisions_by_id.get(req.division_id)
+                is_afternoon = False
+                if division:
+                    div_id = division.id.upper()
+                    if "SY" in div_id or getattr(division, "semester", None) in (3, 4):
+                        is_afternoon = True
+
+                if is_afternoon and len(day_slots) >= 9:
+                    afternoon_band = [p for p in range(4, 7) if any(t.period == p for t in day_slots)]
+                    target_period = afternoon_band[day % len(afternoon_band)] if afternoon_band else 5
+                elif len(day_slots) >= 9:
+                    morning_band = [p for p in range(3, 6) if any(t.period == p for t in day_slots)]
+                    target_period = morning_band[day % len(morning_band)] if morning_band else 4
                 else:
-                    target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
+                    band = [t.period for t in day_slots[2:-1]]
+                    if band:
+                        target_period = band[day % len(band)]
+                    else:
+                        target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
                 dist = abs(ts.period - target_period)
                 if dist:
                     break_unscaled.append(dist * var)
@@ -539,6 +591,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         + [20 * v for v in span_unscaled]
         + [150 * g for g in idle_gaps_unscaled]
         + [800 * cg for cg in consecutive_gap_vars]
+        + [100 * mv for mv in missing_8am_unscaled]
     )
     faculty_obj_terms = [FACULTY_BALANCE_WEIGHT * v for v in workload_unscaled]
 
@@ -557,6 +610,7 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         "day_span": span_unscaled,
         "idle_gaps": idle_gaps_unscaled,
         "consecutive_gaps": consecutive_gap_vars,
+        "missing_8am_start": missing_8am_unscaled,
         "teacher_workload_spread": workload_unscaled,
     }
 
@@ -582,6 +636,13 @@ def _build_model(problem: ProblemInstance) -> _BuiltModel:
         apply_academic_constraints(model, problem, candidates, x)
     except Exception as exc:
         pass
+
+    # Enforce Pinned Sessions: If pinned assignments are present, lock their binary decision variables
+    pinned_sessions = getattr(problem, "pinned_assignments", None) or {}
+    for sid, (pinned_slot_id, pinned_room_id) in pinned_sessions.items():
+        var = x.get((sid, pinned_slot_id, pinned_room_id))
+        if var is not None:
+            model.Add(var == 1)
 
     return _BuiltModel(
         model=model, x=x, requirements=requirements, candidates=candidates,
@@ -735,8 +796,8 @@ class CPSATSolver(SolverBase):
             else:
                 remaining_iters = max(1, max_iters - iter_idx + 1)
                 if incumbent_solution is None:
-                    # Allocate ~55% of the budget to find and optimize the initial incumbent with all 8 workers
-                    iter_time_limit = remaining_budget_s if max_iters <= 1 else min(remaining_budget_s, max(45.0, remaining_budget_s * 0.55))
+                    # Allocate ~65% of the budget (min 60s) to find and optimize the initial incumbent with all 8 workers
+                    iter_time_limit = remaining_budget_s if max_iters <= 1 else min(remaining_budget_s, max(60.0, remaining_budget_s * 0.65))
                     stop_on_first = False
                 else:
                     # Remaining budget goes to warm-started adaptive refinement with updated weights
@@ -781,7 +842,9 @@ class CPSATSolver(SolverBase):
             if controller.converged:
                 break
 
-        final_solution = controller.best_solution or last_iter_solution
+        final_solution = controller.best_solution
+        if final_solution is None and last_iter_solution is not None and last_iter_solution.status in ("OPTIMAL", "FEASIBLE") and last_iter_solution.assignments:
+            final_solution = last_iter_solution
         if final_solution is None:
             return Solution(
                 assignments=[],
@@ -815,24 +878,26 @@ class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
         self.callback_fn = callback_fn
         self.solution_count = 0
         self.stop_on_first = stop_on_first
+        self.best_solution: Solution | None = None
 
     def on_solution_callback(self):
         self.solution_count += 1
-        if self.callback_fn:
-            try:
-                assignments: list[Assignment] = []
-                for req in self.built.requirements:
-                    for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
-                        if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
-                            assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
-                            break
-                sol = Solution(
-                    assignments=assignments,
-                    solver_name="cpsat",
-                    wall_clock_seconds=self.WallTime(),
-                    objective_value=self.ObjectiveValue(),
-                    status="FEASIBLE",
-                )
+        try:
+            assignments: list[Assignment] = []
+            for req in self.built.requirements:
+                for (start_id, _occ, _day, room_id) in self.built.candidates[req.id]:
+                    if self.Value(self.built.x[(req.id, start_id, room_id)]) == 1:
+                        assignments.append(Assignment(session_id=req.id, time_slot_id=start_id, room_id=room_id))
+                        break
+            sol = Solution(
+                assignments=assignments,
+                solver_name="cpsat",
+                wall_clock_seconds=self.WallTime(),
+                objective_value=self.ObjectiveValue(),
+                status="FEASIBLE",
+            )
+            self.best_solution = sol
+            if self.callback_fn:
                 cat_vals = {}
                 for category, terms in self.built.objective_categories.items():
                     if not terms:
@@ -843,8 +908,8 @@ class _IntermediateCallback(cp_model.CpSolverSolutionCallback):
                         except Exception:
                             cat_vals[category] = 0
                 self.callback_fn(sol, cat_vals, self.solution_count, self.WallTime())
-            except Exception:
-                pass
+        except Exception:
+            pass
         if self.stop_on_first:
             self.StopSearch()
 
@@ -899,8 +964,8 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
     if extra_solver_params:
         for key, value in extra_solver_params.items():
             setattr(solver.parameters, key, value)
-    cb = _IntermediateCallback(built, problem, solution_callback, stop_on_first=stop_on_first) if (solution_callback or stop_on_first) else None
-    status = solver.Solve(model, cb) if cb else solver.Solve(model)
+    cb = _IntermediateCallback(built, problem, solution_callback, stop_on_first=stop_on_first)
+    status = solver.Solve(model, cb)
     elapsed = time.time() - start_time
 
     status_map = {
@@ -924,12 +989,22 @@ def _solve_and_decode(built: _BuiltModel, problem: ProblemInstance, time_limit_s
                     break
         for category, terms in built.objective_categories.items():
             category_values[category] = int(solver.Value(sum(terms))) if terms else 0
+        solution = Solution(
+            assignments=assignments, solver_name="cpsat", wall_clock_seconds=elapsed,
+            objective_value=solver.ObjectiveValue(),
+            status=status_name,
+        )
+    elif cb.best_solution is not None and cb.best_solution.assignments:
+        # Search timed out but intermediate callback captured a zero-clash feasible timetable
+        solution = cb.best_solution
+        solution.wall_clock_seconds = elapsed
+        category_values = {category: None for category in built.objective_categories}
     else:
         category_values = {category: None for category in built.objective_categories}
+        solution = Solution(
+            assignments=[], solver_name="cpsat", wall_clock_seconds=elapsed,
+            objective_value=None,
+            status=status_name,
+        )
 
-    solution = Solution(
-        assignments=assignments, solver_name="cpsat", wall_clock_seconds=elapsed,
-        objective_value=solver.ObjectiveValue() if status_name in ("OPTIMAL", "FEASIBLE") else None,
-        status=status_name,
-    )
     return solution, category_values

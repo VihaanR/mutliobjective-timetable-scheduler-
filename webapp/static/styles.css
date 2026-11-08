@@ -1,20 +1,22 @@
 :root {
-    --bg-color: #FAF7F2;
-    --primary: #6B4226;
-    --accent: #C8A97E;
-    --text-color: #2C1A0E;
-    --card-bg: #FFFFFF;
-    --border-color: rgba(107, 66, 38, 0.2);
-    
-    --cell-theory: #FFF8EE;
-    --cell-lab: #F0E6D3;
-    --cell-oe: #EDE0CC;
-    --cell-break: #E8DDD0;
-    --cell-empty: #FFFFFF;
+    --bg-color: #f8fafc;
+    --primary: #003877;
+    --accent: #f26d21;
+    --lab-blue: #0284c7;
+    --text-color: #0f172a;
+    --muted-color: #64748b;
+    --card-bg: #ffffff;
+    --border-color: #e2e8f0;
 
-    --pen-total: #4A2C17;
-    --pen-faculty: #6B4226;
-    --pen-student: #C8A97E;
+    --cell-theory: #f0f7ff;
+    --cell-lab: #f0f9ff;
+    --cell-oe: #fdf4ff;
+    --cell-break: #f1f5f9;
+    --cell-empty: #ffffff;
+
+    --pen-total: #003877;
+    --pen-faculty: #f26d21;
+    --pen-student: #0284c7;
 }
 
 * {
@@ -27,6 +29,27 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: var(--bg-color);
     color: var(--text-color);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
+body,
+table,
+th,
+td,
+.stat-card,
+.stat-title,
+.stat-value,
+.stat-sub,
+.slider-label,
+.step-slider,
+.ctrl-btn,
+.step-info-bar,
+.slot-name,
+.room-badge,
+.batch-badge {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
 }
 
 .navbar {
@@ -37,7 +60,7 @@ body {
     align-items: center;
     padding: 0 24px;
     height: 60px;
-    box-shadow: 0 2px 8px rgba(74, 44, 23, 0.15);
+    box-shadow: 0 2px 8px rgba(0, 56, 119, 0.15);
 }
 
 .navbar .brand {

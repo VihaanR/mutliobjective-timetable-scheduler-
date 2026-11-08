@@ -382,6 +382,20 @@ def export_run_pdf(run_id: int, session: Session = Depends(get_session), _=Depen
     return _export_response(run, export_pdf, ".pdf", PDF_MEDIA_TYPE)
 
 
+class PinSessionRequest(BaseModel):
+    session_id: str
+    pinned: bool = True
+
+
+class PublishRunRequest(BaseModel):
+    lifecycle_status: str = "published"
+
+class RunDiffResponse(BaseModel):
+    run_a_id: int
+    run_b_id: int
+    differences: list[dict]
+    metrics: dict
+
 class AdjustRunRequest(BaseModel):
     constraint_query: Optional[str] = None
     day: int                          # 0=Mon .. 4=Fri — the disrupted weekday
@@ -455,6 +469,10 @@ def move_session(
     if req.fixed_time_slot_id is not None:
         raise HTTPException(
             status_code=400, detail="This session is pinned to a fixed slot and cannot be moved"
+        )
+    if run.pinned_session_ids and body.session_id in run.pinned_session_ids:
+        raise HTTPException(
+            status_code=400, detail="This session is currently pinned. Unpin it first before moving."
         )
 
     # A practical occupies consecutive periods in one day.  Do this before any
@@ -716,4 +734,143 @@ def get_readiness(
 ):
     qualify_ids = spans_multiple_branches(session, branch_ids)
     problem, issues = readiness(session, branch_ids, qualify_ids=qualify_ids)
-    return {"ready": problem is not None and not issues, "issues": issues}
+    
+    scale = {
+        "divisions": len(problem.divisions) if problem else 0,
+        "courses": len(problem.courses) if problem else 0,
+        "rooms": len(problem.rooms) if problem else 0,
+        "faculty": len(problem.faculty) if problem else 0,
+        "time_slots": len(problem.time_slots) if problem else 0,
+        "days": problem.days_per_week if problem else 5,
+    }
+    
+    # Audit policy warnings without blocking readiness
+    policy_warnings = []
+    try:
+        from webapp.routers.constraints import load_academic_constraints_yaml
+        cfg = load_academic_constraints_yaml()
+        if cfg:
+            policy_warnings.append("Academic constraints active (YAML v" + str(cfg.get("version", "1.0")) + ")")
+    except Exception:
+        pass
+
+    return {
+        "ready": problem is not None and not issues,
+        "issues": issues,
+        "scale": scale,
+        "policy_warnings": policy_warnings,
+    }
+
+@router.post("/runs/{run_id}/pin-session")
+def toggle_pin_session(
+    run_id: int,
+    body: PinSessionRequest,
+    session: Session = Depends(get_session),
+    _=Depends(require_faculty),
+):
+    """Toggle pinned state of a session in a run. Pinned sessions are preserved across replans."""
+    run = session.get(TimetableRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    pinned = set(run.pinned_session_ids or [])
+    if body.pinned:
+        pinned.add(body.session_id)
+    else:
+        pinned.discard(body.session_id)
+
+    run.pinned_session_ids = sorted(list(pinned))
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    return {
+        "status": "ok",
+        "run_id": run_id,
+        "session_id": body.session_id,
+        "is_pinned": body.session_id in pinned,
+        "pinned_session_ids": run.pinned_session_ids,
+    }
+
+
+@router.post("/runs/{run_id}/publish")
+def publish_run(
+    run_id: int,
+    body: PublishRunRequest,
+    session: Session = Depends(get_session),
+    _=Depends(require_faculty),
+):
+    """Update run lifecycle state (e.g. published for students)."""
+    run = session.get(TimetableRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run.lifecycle_status = body.lifecycle_status
+    session.add(run)
+    session.commit()
+    session.refresh(run)
+
+    return {"status": "ok", "run_id": run_id, "lifecycle_status": run.lifecycle_status}
+
+
+@router.get("/runs/diff")
+def compare_runs_diff(
+    run_a: int = Query(...),
+    run_b: int = Query(...),
+    session: Session = Depends(get_session),
+    _=Depends(require_faculty),
+):
+    """Compute side-by-side session diff and delta metrics between two runs."""
+    ra = session.get(TimetableRun, run_a)
+    rb = session.get(TimetableRun, run_b)
+    if not ra or not rb:
+        raise HTTPException(status_code=404, detail="One or both runs not found")
+
+    if not ra.solution or not rb.solution or not ra.problem_snapshot:
+        raise HTTPException(status_code=400, detail="Runs lack solution data for diff computation")
+
+    sol_a = solution_from_dict(ra.solution)
+    sol_b = solution_from_dict(rb.solution)
+    prob = problem_from_dict(ra.problem_snapshot)
+
+    slots_by_id = {s.id: s for s in prob.time_slots}
+    reqs_by_id = {r.id: r for r in expand_requirements(prob)}
+
+    asgn_a = sol_a.assignment_by_session()
+    asgn_b = sol_b.assignment_by_session()
+
+    differences = []
+    all_sessions = set(asgn_a.keys()) | set(asgn_b.keys())
+
+    for sid in sorted(all_sessions):
+        aa = asgn_a.get(sid)
+        ab = asgn_b.get(sid)
+        req = reqs_by_id.get(sid)
+        if not aa or not ab or aa.time_slot_id != ab.time_slot_id or aa.room_id != ab.room_id:
+            slot_a_obj = slots_by_id.get(aa.time_slot_id) if aa else None
+            slot_b_obj = slots_by_id.get(ab.time_slot_id) if ab else None
+            differences.append({
+                "session_id": sid,
+                "course": req.course_code if req else sid,
+                "faculty": req.faculty_id if req else "",
+                "division": req.division_id if req else "",
+                "run_a": {
+                    "day": slot_a_obj.day if slot_a_obj else None,
+                    "period": slot_a_obj.period if slot_a_obj else None,
+                    "room": aa.room_id if aa else None,
+                },
+                "run_b": {
+                    "day": slot_b_obj.day if slot_b_obj else None,
+                    "period": slot_b_obj.period if slot_b_obj else None,
+                    "room": ab.room_id if ab else None,
+                },
+            })
+
+    metrics = {
+        "run_a": {"hard": ra.hard, "soft": ra.soft, "label": ra.label},
+        "run_b": {"hard": rb.hard, "soft": rb.soft, "label": rb.label},
+        "moved_count": len(differences),
+        "delta_soft": round((rb.soft or 0.0) - (ra.soft or 0.0), 1),
+    }
+
+    return {"run_a_id": run_a, "run_b_id": run_b, "differences": differences, "metrics": metrics}

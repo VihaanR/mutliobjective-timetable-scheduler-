@@ -112,6 +112,7 @@ def run_generation(run_id: int) -> None:
 
             for i in range(num_candidates):
                 seed = 42 + i * 10007
+                # For large institutional runs, if Candidate 0 is already feasible, candidate generation succeeded
                 sol, stage_reps, wall = _solve_single(
                     run, problem, run.solver, per_candidate_time, opt_mode, seed=seed
                 )
@@ -136,12 +137,21 @@ def run_generation(run_id: int) -> None:
                         "wall_clock": wall,
                         "is_eligible": is_eligible,
                     })
+                elif is_large_solve and candidate_entries and any(c["is_eligible"] for c in candidate_entries):
+                    # For institution-scale problems, do not fail the run if secondary candidate time-out occurs
+                    break
 
             if not candidate_entries:
                 run.status = "failed"
+                scale_hint = ""
+                if hasattr(problem, "divisions") and len(problem.divisions) >= 4:
+                    scale_hint = (
+                        f" (Institution scale: {len(problem.divisions)} divisions, {len(problem.courses)} courses). "
+                        "Recommendation: Increase time limit to >= 120s for Adaptive CP-SAT convergence."
+                    )
                 run.error = (
                     f"{run.solver} failed to find any feasible candidate timetables "
-                    "within the time limit."
+                    f"within the time limit.{scale_hint}"
                 )
                 run.wall_clock = total_wall_clock
                 session.add(run)

@@ -3,6 +3,15 @@
 > **Target Audience:** Autonomous AI coding agents and human contributors working on `mutliobjective-timetable-scheduler-`.
 > **Primary Rule:** Read this document in full before proposing or applying code modifications. Maintain existing conventions, strictly preserve backwards-compatibility for legacy endpoints, keep the core engine decoupled from web concerns, and follow established verification procedures.
 
+
+## Knowledge Graph & Architectural Traversal (graphify)
+> **MANDATE:** For any question regarding codebase architecture, symbol dependencies, data flow, or file relationships, **always consult graphify first** via:
+> - `graphify query "<question>"` (CLI BFS/DFS traversal) or MCP `query_graph`
+> - `graphify path "<Source>" "<Target>"` (shortest path)
+> - `graphify explain "<Symbol>"` (plain-language explanation)
+> Do NOT guess or perform brute-force ad-hoc search when `graphify-out/graph.json` is available.
+> Run `graphify update .` after making structural code edits.
+
 ---
 
 ## 1. Executive Summary & Project Purpose
@@ -384,6 +393,34 @@ python -m research.adaptive_cpsat_benchmark --dataset reference --time-limit 45 
    - Tests that validate higher-level functionality (such as drag-and-drop, export, or UI routing) should gracefully handle solver timeouts or use faster solvers (`greedy` or `reference` seed) to prevent build pipeline hangs.
 6. **No Spurious Artifacts in the Repository:**
    - Never commit ad-hoc `.log`, `.tmp`, or scratch files into the repository root. Always use external scratch directories or clean up temporary files immediately.
+
+---
+
+## 8. Milestone Record — Production Schedule Integrity & Navigation UX
+
+### 8.1 Shift-Aligned Break Placement
+- **Root Cause Eliminated**: Breaks for afternoon cohorts (such as SY Sem IV starting at 11:00 AM) were previously placed into Period 2 (10:00–11:00 AM) before teaching started.
+- **Engine Resolution**:
+  - In [`engine/solvers/candidates.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/solvers/candidates.py), break candidate generation strictly enforces shift boundaries: afternoon shifts restrict breaks to Periods 4–7 (12:00–16:00 PM), while morning shifts restrict breaks to Periods 3–6 (11:00–15:00 PM).
+  - Soft objective penalties in [`engine/scoring.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/scoring.py) and [`engine/solvers/cpsat.py`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/engine/solvers/cpsat.py) dynamically center the target break period to 12:00–14:00 PM.
+  - Verified across all 9 tests in `test_breaks.py` (100% pass) and production solve `Run #123`.
+
+### 8.2 Streamlined Navigation Workflow
+- **Logical Academic Sequence**:
+  Reordered top navigation rail in [`platform.html`](file:///v:/Projects/IPD/mutliobjective-timetable-scheduler-/webapp/static/platform.html):
+  1. `Command Center` (High-level overview & pre-flight status)
+  2. `Solver Console` (Engine selection, time budgets, live solve telemetry)
+  3. `Constraint Studio` (Institutional shift policies & visiting faculty)
+  4. `Academic Data Studio` (Faculty, rooms, courses, allocations)
+  5. `Timetable Matrix` (Interactive schedule deliverable & XLSX/PDF export)
+  6. `Algorithm Benchmarks` (Multi-solver comparative analysis)
+- `Solver Console` now logically precedes `Timetable Matrix`, placing the resulting schedule matrix at the end of the configuration pipeline.
+
+### 8.3 Live Visiting Faculty Management
+- **Interactive Configuration**:
+  - Constraint Studio (Tab 2) updated with dynamic visiting faculty cards showing Priority 1 badges, day-of-week checkboxes (Mon–Fri), and time window inputs (HH:MM) with instant persistence.
+  - Added dedicated forms to designate existing faculty or create new visiting faculty members directly from the UI.
+  - Academic Data Studio faculty table updated with a Visiting Status column and toggle controls.
 
 ---
 

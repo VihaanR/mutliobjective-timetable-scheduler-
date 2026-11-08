@@ -1,144 +1,914 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Log in — DJ Sanghvi Timetable Platform</title>
-<link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVKM's DJSCE — Timetable Optimization Platform</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/icons.js"></script>
+  <style>
+    :root {
+      --inst-navy: #003877;
+      --inst-navy-dark: #002b5c;
+      --inst-navy-light: #004c9e;
+      --inst-orange: #f26d21;
+      --inst-orange-hover: #d95b16;
+      --inst-orange-subtle: rgba(242, 109, 33, 0.08);
+      --inst-orange-border: rgba(242, 109, 33, 0.3);
+      --inst-border: #e2e8f0;
+      --inst-border-focus: #003877;
+      --inst-bg-canvas: #f8fafc;
+      --inst-bg-surface: #ffffff;
+      --inst-text-heading: #0f172a;
+      --inst-text-body: #334155;
+      --inst-text-muted: #64748b;
+      --inst-text-placeholder: #94a3b8;
+      --inst-radius-sm: 6px;
+      --inst-radius-md: 8px;
+      --inst-radius-lg: 12px;
+      --inst-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --inst-shadow-md: 0 4px 6px -1px rgba(0, 56, 119, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --inst-shadow-lg: 0 10px 25px -5px rgba(0, 56, 119, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+      --inst-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--inst-font);
+      background-color: var(--inst-bg-canvas);
+      color: var(--inst-text-body);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Top Institutional Header */
+    .inst-topbar {
+      background: var(--inst-navy);
+      color: #ffffff;
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 3px solid var(--inst-orange);
+      box-shadow: 0 2px 10px rgba(0, 56, 119, 0.2);
+    }
+
+    .inst-brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .inst-crest-frame {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .inst-crest-svg {
+      width: 46px;
+      height: 46px;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    }
+
+    .inst-identity-block {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .inst-trust-name {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 2px;
+    }
+
+    .inst-college-name {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      color: #ffffff;
+      line-height: 1.25;
+    }
+
+    .inst-accreditation-line {
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.85);
+      margin-top: 3px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .inst-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255, 255, 255, 0.12);
+      padding: 2px 7px;
+      border-radius: var(--inst-radius-sm);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .inst-tag.highlight {
+      background: var(--inst-orange);
+      color: #ffffff;
+    }
+
+    .header-badges-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-badge-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 6px 12px;
+      border-radius: var(--inst-radius-md);
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .header-badge-card svg {
+      color: var(--inst-orange);
+      flex-shrink: 0;
+    }
+
+    /* Auth Hero Area */
+    .auth-hero-section {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      background: radial-gradient(circle at 50% 20%, #f1f5f9 0%, #e2e8f0 100%);
+      position: relative;
+    }
+
+    /* Background Geometric Grid Accent */
+    .auth-hero-section::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image:
+        linear-gradient(to right, rgba(0, 56, 119, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 56, 119, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+    }
+
+    /* Portal Card */
+    .portal-card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--inst-bg-surface);
+      border-radius: var(--inst-radius-lg);
+      border: 1px solid var(--inst-border);
+      box-shadow: var(--inst-shadow-lg);
+      overflow: hidden;
+      position: relative;
+      z-index: 1;
+    }
+
+    .portal-card-header {
+      padding: 28px 32px 18px;
+      text-align: center;
+      background: var(--inst-bg-surface);
+      border-bottom: 1px solid var(--inst-border);
+    }
+
+    .portal-title-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--inst-navy);
+      background: rgba(0, 56, 119, 0.06);
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .portal-card-header h2 {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--inst-text-heading);
+      letter-spacing: -0.3px;
+      margin-bottom: 6px;
+    }
+
+    .portal-card-header p {
+      font-size: 13.5px;
+      color: var(--inst-text-muted);
+      line-height: 1.4;
+    }
+
+    .portal-card-body {
+      padding: 24px 32px 30px;
+    }
+
+    /* Role Switcher Pills */
+    .role-switcher-container {
+      margin-bottom: 22px;
+    }
+
+    .role-switcher-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--inst-text-muted);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .role-pill-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: var(--inst-radius-md);
+      border: 1px solid var(--inst-border);
+    }
+
+    .role-pill {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: var(--inst-radius-sm);
+      border: 1px solid transparent;
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--inst-text-muted);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .role-pill svg {
+      transition: stroke 0.18s ease;
+      flex-shrink: 0;
+    }
+
+    .role-pill:hover:not(.active) {
+      color: var(--inst-navy);
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .role-pill.active {
+      background: #ffffff;
+      color: var(--inst-navy);
+      font-weight: 700;
+      border-color: var(--inst-border);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .role-pill.active svg {
+      stroke: var(--inst-orange);
+    }
+
+    /* Alert Banner */
+    .portal-alert {
+      padding: 12px 14px;
+      border-radius: var(--inst-radius-md);
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      line-height: 1.45;
+    }
+
+    .portal-alert.error {
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+
+    .portal-alert svg {
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* Form Inputs */
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .form-group label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--inst-text-heading);
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-prefix-icon {
+      position: absolute;
+      left: 13px;
+      color: var(--inst-text-muted);
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 11px 14px 11px 40px;
+      font-size: 14px;
+      font-family: var(--inst-font);
+      border: 1.5px solid var(--inst-border);
+      border-radius: var(--inst-radius-md);
+      background: var(--inst-bg-canvas);
+      color: var(--inst-text-heading);
+      transition: all 0.15s ease;
+    }
+
+    .form-control::placeholder {
+      color: var(--inst-text-placeholder);
+    }
+
+    .form-control:hover {
+      border-color: #cbd5e1;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--inst-border-focus);
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(0, 56, 119, 0.15);
+    }
+
+    /* Password Toggle Button */
+    .btn-password-toggle {
+      position: absolute;
+      right: 10px;
+      background: transparent;
+      border: none;
+      padding: 6px;
+      cursor: pointer;
+      color: var(--inst-text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--inst-radius-sm);
+      transition: color 0.15s ease;
+    }
+
+    .btn-password-toggle:hover {
+      color: var(--inst-navy);
+    }
+
+    .btn-password-toggle:focus-visible {
+      outline: 2px solid var(--inst-navy);
+    }
+
+    /* Submit Button */
+    .btn-portal-submit {
+      width: 100%;
+      padding: 13px 18px;
+      background: var(--inst-navy);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--inst-radius-md);
+      font-size: 14.5px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 6px;
+      box-shadow: 0 4px 12px rgba(0, 56, 119, 0.25);
+      transition: background 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+    }
+
+    .btn-portal-submit:hover:not(:disabled) {
+      background: var(--inst-navy-dark);
+      box-shadow: 0 6px 16px rgba(0, 56, 119, 0.35);
+    }
+
+    .btn-portal-submit:active:not(:disabled) {
+      transform: scale(0.99);
+    }
+
+    .btn-portal-submit:focus-visible {
+      outline: 3px solid var(--inst-orange);
+      outline-offset: 2px;
+    }
+
+    .btn-portal-submit:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    /* Dev Credentials Quick-Fill Panel */
+    .dev-helper-panel {
+      margin-top: 24px;
+      padding: 14px;
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: var(--inst-radius-md);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dev-helper-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .dev-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #b45309;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .dev-hint {
+      font-size: 11.5px;
+      color: var(--inst-text-muted);
+    }
+
+    .dev-helper-creds {
+      font-size: 12px;
+      color: var(--inst-text-body);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      background: #ffffff;
+      padding: 8px 10px;
+      border-radius: var(--inst-radius-sm);
+      border: 1px solid var(--inst-border);
+    }
+
+    .dev-helper-creds code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 600;
+      color: var(--inst-navy);
+      background: rgba(0, 56, 119, 0.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    .btn-dev-autofill {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 8px 12px;
+      background: #ffffff;
+      border: 1px solid var(--inst-orange);
+      color: var(--inst-orange);
+      font-size: 12.5px;
+      font-weight: 700;
+      border-radius: var(--inst-radius-sm);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-dev-autofill:hover {
+      background: var(--inst-orange);
+      color: #ffffff;
+    }
+
+    .btn-dev-autofill:focus-visible {
+      outline: 2px solid var(--inst-navy);
+      outline-offset: 1px;
+    }
+
+    .btn-dev-autofill.injected {
+      background: #16a34a;
+      border-color: #16a34a;
+      color: #ffffff;
+    }
+
+    /* Institutional Footer */
+    .inst-footer {
+      background: var(--inst-navy);
+      color: rgba(255, 255, 255, 0.7);
+      padding: 16px 28px;
+      font-size: 12px;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .inst-footer a {
+      color: rgba(255, 255, 255, 0.9);
+      text-decoration: none;
+    }
+
+    .inst-footer a:hover {
+      text-decoration: underline;
+      color: #ffffff;
+    }
+
+    /* Responsive Queries */
+    @media (max-width: 768px) {
+      .header-badges-right {
+        display: none;
+      }
+      .inst-topbar {
+        padding: 12px 16px;
+      }
+      .inst-college-name {
+        font-size: 15px;
+      }
+      .inst-accreditation-line {
+        font-size: 10.5px;
+      }
+      .auth-hero-section {
+        padding: 24px 14px;
+      }
+      .portal-card-header {
+        padding: 22px 20px 14px;
+      }
+      .portal-card-body {
+        padding: 18px 20px 24px;
+      }
+    }
+  </style>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <div class="logo">TT</div>
-    <div>
-      <h1>DJ Sanghvi Timetable Platform</h1>
-      <p class="sub">NEP 2020 dynamic timetable generation</p>
-    </div>
-  </div>
-</header>
 
-<div class="auth-wrap">
-  <div class="auth-card">
-    <h2>Log in</h2>
-    <p class="auth-hint" id="authHint">Choose your role and sign in.</p>
-
-    <div class="role-toggle">
-      <button type="button" id="roleTeacherBtn" class="active">Teacher</button>
-      <button type="button" id="roleStudentBtn">Student</button>
-    </div>
-
-    <p class="auth-error" id="authError"></p>
-
-    <form id="loginForm">
-      <div class="auth-field">
-        <label for="email">Email</label>
-        <input type="email" id="email" required autocomplete="username">
+  <!-- Top Institutional Header with Official Heraldry -->
+  <header class="inst-topbar" role="banner">
+    <div class="inst-brand-wrap">
+      <div class="inst-crest-frame" aria-hidden="true">
+        <!-- SVKM DJSCE Vector Crest SVG -->
+        <svg class="inst-crest-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer Heraldic Shield -->
+          <path d="M32 3L8 13V29C8 44.5 18.2 58.8 32 63C45.8 58.8 56 44.5 56 29V13L32 3Z" fill="#003877" stroke="#f26d21" stroke-width="2.5" stroke-linejoin="round"/>
+          <!-- Inner Shield Trim -->
+          <path d="M32 7L12 15.5V29C12 42.2 20.6 54.4 32 58.2C43.4 54.4 52 42.2 52 29V15.5L32 7Z" fill="#002b5c" stroke="#ffffff" stroke-width="1" stroke-opacity="0.3"/>
+          <!-- Radiant Sun of Wisdom -->
+          <circle cx="32" cy="22" r="5" fill="#f26d21"/>
+          <path d="M32 12V15M32 29V32M22 22H25M39 22H42M25 15L27 17M37 27L39 29M25 29L27 27M37 17L39 15" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+          <!-- Open Book of Knowledge -->
+          <path d="M20 38C24 36 29 36 32 38C35 36 40 36 44 38V47C40 45 35 45 32 47C29 45 24 45 20 47V38Z" fill="#ffffff"/>
+          <path d="M32 38V47" stroke="#003877" stroke-width="1.5"/>
+          <!-- Saffron Base Ribbon -->
+          <path d="M14 53C20 56 44 56 50 53" stroke="#f26d21" stroke-width="2" stroke-linecap="round"/>
+        </svg>
       </div>
-      <div class="auth-field">
-        <label for="password">Password</label>
-        <input type="password" id="password" required autocomplete="current-password">
-      </div>
-      <button type="submit" class="auth-submit" id="submitBtn">Log in</button>
-    </form>
 
-    <div class="auth-bootstrap-toggle">
-      <a id="showBootstrap">First time setting up this platform? Claim a teacher account &rarr;</a>
+      <div class="inst-identity-block">
+        <span class="inst-trust-name">Shri Vile Parle Kelavani Mandal's</span>
+        <h1 class="inst-college-name">Dwarkadas J. Sanghvi College of Engineering</h1>
+        <div class="inst-accreditation-line">
+          <span class="inst-tag">Autonomous Institution</span>
+          <span>Affiliated to University of Mumbai</span>
+          <span class="inst-tag highlight">NAAC 'A' Grade</span>
+        </div>
+      </div>
     </div>
 
-    <form id="bootstrapForm" style="display:none; margin-top:18px; border-top:1px solid var(--line); padding-top:18px;">
-      <p class="auth-hint">
-        One-time setup: claim login credentials for a faculty member already in the system
-        (e.g. seeded from the reference dataset). This only works before anyone has logged in yet.
-      </p>
-      <div class="auth-field">
-        <label for="bsCode">Faculty code</label>
-        <input type="text" id="bsCode" placeholder="e.g. AR" required>
+    <div class="header-badges-right">
+      <div class="header-badge-card">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>NEP 2020 Compliant</span>
       </div>
-      <div class="auth-field">
-        <label for="bsEmail">Email</label>
-        <input type="email" id="bsEmail" required>
+      <div class="header-badge-card">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="8" r="7"></circle>
+          <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
+        </svg>
+        <span>NBA Accredited</span>
       </div>
-      <div class="auth-field">
-        <label for="bsPassword">Choose a password</label>
-        <input type="password" id="bsPassword" required minlength="6">
+    </div>
+  </header>
+
+  <!-- Main Hero Auth Canvas -->
+  <main class="auth-hero-section">
+    <div class="portal-card" role="region" aria-labelledby="portalHeading">
+      <div class="portal-card-header">
+        <div class="portal-title-badge">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span>Institutional Gateway</span>
+        </div>
+        <h2 id="portalHeading">Sign In to Timetable Platform</h2>
+        <p id="portalSub">Faculty and administration access for scheduling &amp; generation</p>
       </div>
-      <button type="submit" class="auth-submit" id="bootstrapBtn">Claim account &amp; log in</button>
-    </form>
-  </div>
-</div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-let role = "faculty";
+      <div class="portal-card-body">
+        <!-- Clean SVG Role Switcher Pills -->
+        <div class="role-switcher-container">
+          <span class="role-switcher-label">Select Academic Role</span>
+          <div class="role-pill-group" role="tablist" aria-label="Academic Role Selection">
+            <button type="button" class="role-pill active" id="btnRoleFaculty" role="tab" aria-selected="true" aria-controls="portalLoginForm">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              <span>Faculty &amp; Admin</span>
+            </button>
+            <button type="button" class="role-pill" id="btnRoleStudent" role="tab" aria-selected="false" aria-controls="portalLoginForm">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+                <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+              </svg>
+              <span>Student View</span>
+            </button>
+          </div>
+        </div>
 
-$("roleTeacherBtn").addEventListener("click", () => setRole("faculty"));
-$("roleStudentBtn").addEventListener("click", () => setRole("student"));
+        <!-- Alert Display -->
+        <div class="portal-alert error" id="alertBox" role="alert" aria-live="polite" style="display: none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span id="alertMsg">Authentication failed</span>
+        </div>
 
-function setRole(r) {
-  role = r;
-  $("roleTeacherBtn").classList.toggle("active", r === "faculty");
-  $("roleStudentBtn").classList.toggle("active", r === "student");
-  $("authHint").textContent = r === "faculty"
-    ? "Teachers can edit the dashboard, generate timetables, and see their own schedule."
-    : "Students get a read-only view of their division's timetable.";
-}
+        <!-- Login Form -->
+        <form id="portalLoginForm" novalidate>
+          <div class="form-group">
+            <div class="form-label-row">
+              <label for="email" id="emailLabel">Institutional Email</label>
+            </div>
+            <div class="input-wrapper">
+              <span class="input-prefix-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+              </span>
+              <input 
+                type="email" 
+                id="email" 
+                name="email" 
+                class="form-control" 
+                required 
+                placeholder="name@djsce.ac.in" 
+                autocomplete="username"
+                spellcheck="false"
+              >
+            </div>
+          </div>
 
-function showError(message) {
-  const box = $("authError");
-  box.textContent = message;
-  box.style.display = message ? "block" : "none";
-}
+          <div class="form-group">
+            <div class="form-label-row">
+              <label for="password">Password</label>
+            </div>
+            <div class="input-wrapper">
+              <span class="input-prefix-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </span>
+              <input 
+                type="password" 
+                id="password" 
+                name="password" 
+                class="form-control" 
+                required 
+                placeholder="Enter password" 
+                autocomplete="current-password"
+              >
+              <button 
+                type="button" 
+                class="btn-password-toggle" 
+                id="btnTogglePassword" 
+                aria-label="Toggle password visibility"
+                title="Show password"
+              >
+                <svg id="eyeIconSvg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </button>
+            </div>
+          </div>
 
-$("loginForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  showError("");
-  $("submitBtn").disabled = true;
-  try {
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, email: $("email").value, password: $("password").value }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || "login failed");
+          <button type="submit" class="btn-portal-submit" id="btnSubmit">
+            <svg id="submitIconSvg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+              <polyline points="10 17 15 12 10 7"></polyline>
+              <line x1="15" y1="12" x2="3" y2="12"></line>
+            </svg>
+            <span id="btnSubmitText">Sign in to Platform</span>
+          </button>
+        </form>
+
+        <!-- Dev Mode Sample Credentials Quick-Fill Panel -->
+        <div class="dev-helper-panel" id="devHelperPanel">
+          <div class="dev-helper-header">
+            <span class="dev-pill">DEV MODE</span>
+            <span class="dev-hint">Quick-fill test credentials</span>
+          </div>
+          <div class="dev-helper-creds">
+            <span>Email: <code>admin@djsce.ac.in</code></span>
+            <span>Pass: <code>devpass123</code></span>
+          </div>
+          <button type="button" class="btn-dev-autofill" id="btnDevAutofill" title="Fill form with sample admin credentials">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span id="devAutofillLabel">Auto-fill Dev Credentials</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Institutional Footer -->
+  <footer class="inst-footer" role="contentinfo">
+    <p>&copy; 2026 Shri Vile Parle Kelavani Mandal (SVKM) &middot; Dwarkadas J. Sanghvi College of Engineering</p>
+    <p>Autonomous College Affiliated to the University of Mumbai &middot; Timetable Planning Platform</p>
+  </footer>
+
+  <script>
+    let currentRole = "faculty";
+    const btnFaculty = document.getElementById("btnRoleFaculty");
+    const btnStudent = document.getElementById("btnRoleStudent");
+    const alertBox = document.getElementById("alertBox");
+    const alertMsg = document.getElementById("alertMsg");
+    const portalSub = document.getElementById("portalSub");
+    const emailInput = document.getElementById("email");
+    const passwordInput = document.getElementById("password");
+    const emailLabel = document.getElementById("emailLabel");
+    const btnSubmit = document.getElementById("btnSubmit");
+    const btnSubmitText = document.getElementById("btnSubmitText");
+    const btnTogglePassword = document.getElementById("btnTogglePassword");
+    const eyeIconSvg = document.getElementById("eyeIconSvg");
+    const btnDevAutofill = document.getElementById("btnDevAutofill");
+    const devAutofillLabel = document.getElementById("devAutofillLabel");
+
+    // Role switcher events
+    btnFaculty.addEventListener("click", () => setRole("faculty"));
+    btnStudent.addEventListener("click", () => setRole("student"));
+
+    function setRole(role) {
+      currentRole = role;
+      const isFaculty = role === "faculty";
+      btnFaculty.classList.toggle("active", isFaculty);
+      btnStudent.classList.toggle("active", !isFaculty);
+      btnFaculty.setAttribute("aria-selected", isFaculty ? "true" : "false");
+      btnStudent.setAttribute("aria-selected", !isFaculty ? "true" : "false");
+
+      portalSub.textContent = isFaculty
+        ? "Faculty and administration access for scheduling & generation"
+        : "Read-only timetable access for enrolled students";
+
+      emailLabel.textContent = isFaculty ? "Institutional Email" : "Student SAP ID / Email";
+      emailInput.placeholder = isFaculty ? "name@djsce.ac.in" : "60004210001@djsce.ac.in";
+      alertBox.style.display = "none";
     }
-    const data = await res.json();
-    window.location.href = data.role === "student" ? "/student" : "/my-timetable";
-  } catch (err) {
-    showError(err.message || String(err));
-  } finally {
-    $("submitBtn").disabled = false;
-  }
-});
 
-$("showBootstrap").addEventListener("click", () => {
-  $("bootstrapForm").style.display = $("bootstrapForm").style.display === "none" ? "block" : "none";
-});
+    // Password visibility toggle
+    let passwordVisible = false;
+    btnTogglePassword.addEventListener("click", () => {
+      passwordVisible = !passwordVisible;
+      passwordInput.type = passwordVisible ? "text" : "password";
+      btnTogglePassword.title = passwordVisible ? "Hide password" : "Show password";
+      btnTogglePassword.setAttribute("aria-label", passwordVisible ? "Hide password" : "Show password");
 
-$("bootstrapForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  showError("");
-  $("bootstrapBtn").disabled = true;
-  try {
-    const res = await fetch("/api/auth/bootstrap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        faculty_code: $("bsCode").value, email: $("bsEmail").value, password: $("bsPassword").value,
-      }),
+      if (passwordVisible) {
+        eyeIconSvg.innerHTML = `
+          <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path>
+          <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path>
+          <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path>
+          <line x1="2" y1="2" x2="22" y2="22"></line>
+        `;
+      } else {
+        eyeIconSvg.innerHTML = `
+          <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        `;
+      }
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || "bootstrap failed");
-    }
-    window.location.href = "/";
-  } catch (err) {
-    showError(err.message || String(err));
-  } finally {
-    $("bootstrapBtn").disabled = false;
-  }
-});
-</script>
+
+    // Dev-mode Sample Credentials Auto-fill
+    btnDevAutofill.addEventListener("click", () => {
+      setRole("faculty");
+      emailInput.value = "admin@djsce.ac.in";
+      passwordInput.value = "devpass123";
+      alertBox.style.display = "none";
+
+      devAutofillLabel.textContent = "Credentials Injected!";
+      btnDevAutofill.classList.add("injected");
+
+      setTimeout(() => {
+        devAutofillLabel.textContent = "Auto-fill Dev Credentials";
+        btnDevAutofill.classList.remove("injected");
+      }, 2000);
+
+      btnSubmit.focus();
+    });
+
+    // Form submit handler with secure role routing
+    document.getElementById("portalLoginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      alertBox.style.display = "none";
+
+      const emailVal = emailInput.value.trim();
+      const passwordVal = passwordInput.value;
+
+      if (!emailVal || !passwordVal) {
+        alertBox.style.display = "flex";
+        alertMsg.textContent = "Please enter both email and password.";
+        return;
+      }
+
+      btnSubmit.disabled = true;
+      btnSubmitText.textContent = "Authenticating...";
+
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: currentRole,
+            email: emailVal,
+            password: passwordVal
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Authentication failed. Please verify credentials.");
+        }
+
+        const data = await res.json();
+        // Route role appropriately
+        window.location.href = data.role === "student" ? "/student" : "/platform";
+      } catch (err) {
+        alertBox.style.display = "flex";
+        alertMsg.textContent = err.message;
+      } finally {
+        btnSubmit.disabled = false;
+        btnSubmitText.textContent = "Sign in to Platform";
+      }
+    });
+  </script>
 </body>
 </html>

@@ -23,37 +23,54 @@ router = APIRouter(prefix="/api", tags=["faculty"])
 
 
 @router.get("/faculty/me/timetable")
-def my_timetable(session: Session = Depends(get_session), principal: dict = Depends(require_faculty)):
-    """Read-only: the caller's own personal timetable - every session they teach, merged across
-    every division AND every branch (year/semester) they're allocated to (unlike the student
-    version, which is scoped to exactly one division). Regroups the already-stored `run.grids` by
-    `entry["faculty"] == Faculty.code` rather than re-solving - `run.grids` is precomputed once at
-    generation time (webapp/jobs.py) and each entry already carries the engine faculty code, its
-    `division_id`, and (as of the multi-year feature) branch identity fields stamped by
-    `webapp.grid_meta.annotate_grids` - `class_label`, `year_label`, `semester`, etc.
+def my_timetable(faculty_id: int | None = None, session: Session = Depends(get_session), principal: dict = Depends(require_faculty)):
+    target_id = principal["id"]
+    if principal["role"] == "admin":
+        if faculty_id is not None:
+            target_id = faculty_id
+        else:
+            admin_fac = session.get(Faculty, target_id)
+            if admin_fac and admin_fac.code == "ADMIN":
+                nm_fac = session.exec(select(Faculty).where(Faculty.code == "NM")).first()
+                if nm_fac:
+                    target_id = nm_fac.id
 
-    A teacher who teaches e.g. SY and TY only sees both years here if a single run's `grids`
-    actually contains both — which is exactly what the "Generate All Years Timetable" button on
-    the platform page produces (`POST /api/runs` with `branch_ids: null`). A run scoped to one
-    branch can only ever show that one branch's sessions, however recent it is; this endpoint
-    always reads the single latest "done" run, so generating a fresh single-branch run after an
-    all-years one will narrow this view back down to that one branch until an all-years run is
-    generated again.
-    """
-    faculty = get_or_404(session, Faculty, principal["id"])
+    faculty = get_or_404(session, Faculty, target_id)
 
-    run = session.exec(
+    runs = session.exec(
         select(TimetableRun)
         .where(TimetableRun.status == "done")
         .order_by(TimetableRun.created_at.desc())
-    ).first()
-    if run is None or not run.grids:
+    ).all()
+    if not runs:
+        raise HTTPException(status_code=404, detail="no generated timetable available yet")
+
+    # Prefer comprehensive run with maximum divisions (e.g. all even semesters)
+    run = next((r for r in runs if r.grids and len(r.grids.get("divisions", [])) >= 3), runs[0])
+    if not run.grids:
         raise HTTPException(status_code=404, detail="no generated timetable available yet")
 
     cells: dict[str, list] = {}
-    for division in run.grids["divisions"]:
-        for key, entries in division["cells"].items():
-            mine = [e for e in entries if e.get("faculty") == faculty.code]
+    semesters_found = set()
+
+    for division in run.grids.get("divisions", []):
+        for key, entries in division.get("cells", {}).items():
+            mine = []
+            for e in entries:
+                if e.get("faculty") == faculty.code:
+                    entry_copy = dict(e)
+                    label = str(e.get("class_label") or division.get("class_label") or division.get("id") or "").upper()
+                    sem = None
+                    if "SEM4" in label or "SEM 4" in label or "SEM IV" in label or "SY" in label:
+                        sem = 4
+                    elif "SEM6" in label or "SEM 6" in label or "SEM VI" in label or "TY" in label:
+                        sem = 6
+                    elif "SEM8" in label or "SEM 8" in label or "SEM VIII" in label or "BTECH" in label:
+                        sem = 8
+                    entry_copy["semester"] = sem
+                    if sem:
+                        semesters_found.add(sem)
+                    mine.append(entry_copy)
             if mine:
                 cells.setdefault(key, []).extend(mine)
 
@@ -62,14 +79,24 @@ def my_timetable(session: Session = Depends(get_session), principal: dict = Depe
         if e.get("class_label")
     })
 
+    all_faculties = []
+    if principal["role"] == "admin":
+        fac_rows = session.exec(select(Faculty).order_by(Faculty.name)).all()
+        all_faculties = [{"id": f.id, "code": f.code, "name": f.name} for f in fac_rows if f.code != "ADMIN"]
+
     return {
         "run_id": run.id,
+        "faculty_id": faculty.id,
         "faculty_name": faculty.name,
+        "faculty_code": faculty.code,
         "days": run.grids["days"],
         "periods": run.grids["periods"],
         "cells": cells,
         "classes": classes,
-        "spans_multiple_branches": len({e.get("branch_id") for v in cells.values() for e in v}) > 1,
+        "semesters": sorted(list(semesters_found)),
+        "spans_multiple_branches": len(semesters_found) > 1 or len({e.get("branch_id") for v in cells.values() for e in v}) > 1,
+        "is_admin": principal["role"] == "admin",
+        "all_faculties": all_faculties,
     }
 
 

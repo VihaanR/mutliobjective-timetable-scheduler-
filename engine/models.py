@@ -112,7 +112,13 @@ class Division:
         value = self.faculty_by_course.get(course_code)
         if value is None:
             return None
-        if isinstance(value, tuple):
+        if isinstance(value, (tuple, list)):
+            if len(value) >= 3:
+                if batch_id is None:
+                    return value[0]
+                batches = self.batch_pair()
+                idx = batches.index(batch_id) if batch_id in batches else 0
+                return value[1 + idx] if (1 + idx) < len(value) else value[0]
             if batch_id is None:
                 return value[0]
             batches = self.batch_pair()
@@ -331,7 +337,9 @@ def expand_requirements(problem: ProblemInstance) -> list[SessionRequirement]:
                 ))
 
             for i in range(course.practical_sessions_per_week):
-                batch_group_id = f"{division.id}_{code}_PR_{i}"
+                batch_facs = [division.faculty_for(code, batch) for batch in division.batch_pair()]
+                all_distinct_fac = (len(batch_facs) == len(set(batch_facs))) if all(batch_facs) else False
+                batch_group_id = f"{division.id}_{code}_PR_{i}" if all_distinct_fac else None
                 for batch in division.batch_pair():
                     b_faculty_id = division.faculty_for(code, batch)
                     requirements.append(SessionRequirement(

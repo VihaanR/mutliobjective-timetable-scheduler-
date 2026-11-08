@@ -42,6 +42,16 @@ const $ = (id) => document.getElementById(id);
 const TYPE_CLASS = { Theory: "theory", Practical: "lab", Tutorial: "tutorial", Break: "break" };
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function buildGridTable(data) {
   const table = document.createElement("table");
   table.className = "tt";
@@ -70,10 +80,14 @@ function buildGridTable(data) {
           if (e.is_break) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
-            const batch = e.batch ? ` &middot; ${e.batch}` : "";
+            const safeCourse = escapeHtml(e.course);
+            const safeType = e.type === "Practical" ? " (Lab)" : "";
+            const safeFac = escapeHtml(e.faculty_name || e.faculty || "");
+            const safeRoom = e.room_name ? ` &middot; @${escapeHtml(e.room_name)}` : "";
+            const safeBatch = e.batch ? ` &middot; ${escapeHtml(e.batch)}` : "";
             s.innerHTML =
-              `<div class="s-course">${e.course}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
-              `<div class="s-meta">${e.faculty_name || e.faculty || ""}${e.room_name ? " &middot; @" + e.room_name : ""}${batch}</div>`;
+              `<div class="s-course">${safeCourse}${safeType}</div>` +
+              `<div class="s-meta">${safeFac}${safeRoom}${safeBatch}</div>`;
           }
           cell.appendChild(s);
         });

@@ -55,3 +55,11 @@ Thumbs.db
 webapp/data/
 webapp/uploads/
 research/fork_benchmark_results.json
+
+# Vercel & Environment
+.vercel/
+.env
+.env.local
+.env.*.local
+graphify-out/
+

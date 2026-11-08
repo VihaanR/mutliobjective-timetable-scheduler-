@@ -88,3 +88,9 @@ def delete_allocation(allocation_id: int, session: Session = Depends(get_session
     session.delete(alloc)
     session.commit()
     return {"deleted": allocation_id}
+
+
+@router.post("/allocations/sync-master-xlsx")
+def sync_master_xlsx(session: Session = Depends(get_session), _=Depends(require_faculty)):
+    from webapp.allocation_sync import sync_master_xlsx_into_db
+    return sync_master_xlsx_into_db(session)

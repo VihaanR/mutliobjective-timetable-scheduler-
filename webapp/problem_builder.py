@@ -93,19 +93,23 @@ def build_division_meta(session: Session, branch_ids: list[int] | None = None,
 def _faculty_by_course_value(alloc: Allocation, faculty_code_by_id: dict[int, str]):
     """Resolve one allocation's faculty payload for `Division.faculty_by_course`.
 
-    Returns a single faculty code, a `[batch1_code, batch2_code]` 2-list, or `None` when no
-    faculty is resolvable (missing FK entirely, or one referenced faculty row no longer exists) —
-    callers skip the course on `None` so `ProblemInstance.validate()` flags the gap instead of this
-    module papering over it.
+    Returns a single faculty code, a `[batch1_code, batch2_code]` 2-list, a `[theory, b1, b2]` 3-list,
+    or `None` when no faculty is resolvable.
     """
-    if alloc.faculty_id is not None:
-        return faculty_code_by_id.get(alloc.faculty_id)
+    if alloc.faculty_id is not None and alloc.batch1_faculty_id is not None and alloc.batch2_faculty_id is not None:
+        fac = faculty_code_by_id.get(alloc.faculty_id)
+        b1 = faculty_code_by_id.get(alloc.batch1_faculty_id)
+        b2 = faculty_code_by_id.get(alloc.batch2_faculty_id)
+        if fac and b1 and b2:
+            return [fac, b1, b2]
     if alloc.batch1_faculty_id is not None and alloc.batch2_faculty_id is not None:
         b1 = faculty_code_by_id.get(alloc.batch1_faculty_id)
         b2 = faculty_code_by_id.get(alloc.batch2_faculty_id)
         if b1 is not None and b2 is not None:
             return [b1, b2]
         return None
+    if alloc.faculty_id is not None:
+        return faculty_code_by_id.get(alloc.faculty_id)
     return None
 
 
@@ -178,7 +182,10 @@ def build_problem_dict(session: Session, branch_ids: list[int] | None = None,
             "credits": c.credits,
             "category": c.category,
             "theory_sessions_per_week": c.theory_per_week,
-            "practical_sessions_per_week": c.practical_per_week,
+            # practical_per_week is contact hours; each lab session occupies 2 consecutive slots,
+            # so the number of *sessions* is contact-hours // 2.  E.g. practical_per_week=2 -> 1
+            # two-hour lab block per week (not 2 separate one-hour sessions).
+            "practical_sessions_per_week": max(1, c.practical_per_week // 2) if c.practical_per_week else 0,
             "tutorial_sessions_per_week": c.tutorial_per_week,
             "is_heavy": c.is_heavy,
         }

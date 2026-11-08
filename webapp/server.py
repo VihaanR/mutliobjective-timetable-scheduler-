@@ -15,7 +15,7 @@ from pathlib import Path
 import json
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from sqlmodel import Session, select
 
 
@@ -30,7 +30,10 @@ from webapp.models_db import Branch, TimetableRun
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -63,11 +66,39 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Timetable Scheduler", lifespan=lifespan)
+app = FastAPI(title="Timetable Scheduler", lifespan=lifespan, debug=True)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    import traceback
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+            "url": str(request.url),
+        },
+    )
 
 @app.get("/api/health")
 def health():
     return {"status": "ok", "lifespan_error": getattr(app.state, "lifespan_error", None)}
+
+@app.get("/api/ping")
+def ping():
+    return {"ping": "pong"}
+
+@app.get("/api/debug-env")
+def debug_env():
+    safe_env = {k: v for k, v in os.environ.items() if not any(s in k.lower() for s in ["key", "secret", "pass", "token"])}
+    return {
+        "env": safe_env,
+        "cwd": os.getcwd(),
+        "tmp_files": os.listdir("/tmp") if os.path.exists("/tmp") else [],
+        "static_exists": STATIC_DIR.exists(),
+        "static_files": os.listdir(STATIC_DIR) if STATIC_DIR.exists() else [],
+    }
 
 for _router in (auth_router.router, branches.router, faculty.router, students.router, courses.router,
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,

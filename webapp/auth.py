@@ -87,6 +87,11 @@ def matches_dev_sample_teacher_credentials(email: str, password: str) -> bool:
 
 
 def get_secret(session: Session) -> str:
+    env_secret = os.environ.get("TIMETABLE_SECRET_KEY") or (
+        "djsce-timetable-scheduler-dev-secret-key-32b" if ALLOW_DEV_FALLBACK else None
+    )
+    if env_secret:
+        return env_secret
     """The HMAC signing secret for session tokens - generated once, reused after."""
     row = session.exec(select(AppSecret)).first()
     if row is not None:

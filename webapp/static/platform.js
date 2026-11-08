@@ -574,7 +574,11 @@ async function generate(mode = "selected", specificBranchId = null) {
     pollRun(currentRunId, label);
   } catch (e) {
     statusEl.className = "status-line";
-    statusEl.textContent = "error submitting run: " + (e.message || e);
+    const isNetworkErr = e.name === "AbortError" || String(e.message || e).includes("Failed to fetch");
+    const msg = isNetworkErr
+      ? "network connection closed or timed out. On serverless (Vercel), requests have a 30s limit; try a single semester cohort or view the pre-computed 0-clash timetable in the Matrix tab."
+      : (e.message || e);
+    statusEl.textContent = "error submitting run: " + msg;
     if (btn) btn.disabled = false;
     if (stopBtn) stopBtn.style.display = "none";
   }

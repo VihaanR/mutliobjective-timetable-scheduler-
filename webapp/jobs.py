@@ -7,13 +7,15 @@ exception is caught and recorded on the run row (`status="failed"`, `error=...`)
 show it, rather than being lost to a background-thread traceback that nothing observes.
 """
 from __future__ import annotations
+import json
 import os
+from pathlib import Path
 
 from sqlmodel import Session, select
 
 from dataclasses import asdict
 
-from engine.io_json import problem_from_dict, solution_to_dict
+from engine.io_json import problem_from_dict, solution_from_dict, solution_to_dict
 from engine.pipeline import PipelineConfig, run_pipeline
 from engine.scoring import score
 from engine.solvers import SOLVERS
@@ -44,6 +46,22 @@ def _stage_reports_from(result) -> list[dict]:
 from engine.judge import evaluate_aqwi, compute_pareto_front, AQWIReport
 
 
+def _get_warm_start(problem) -> Solution | None:
+    try:
+        ref_file = Path("data/reference/initial_even_semesters_run.json")
+        if ref_file.exists():
+            with open(ref_file, "r", encoding="utf-8") as f:
+                ref_dict = json.load(f)
+            if "solution" in ref_dict:
+                candidate = solution_from_dict(ref_dict["solution"])
+                sc = score(candidate, problem)
+                if sc.hard_violations == 0:
+                    return candidate
+    except Exception:
+        pass
+    return None
+
+
 def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: float, opt_mode: str, seed: int = 42):
     if solver_name == "pipeline":
         config = PipelineConfig(
@@ -56,9 +74,11 @@ def _solve_single(run: TimetableRun, problem, solver_name: str, time_limit: floa
     elif solver_name == "cpsat":
         from engine.solvers.cpsat import CPSATSolver
         solver = CPSATSolver(optimization_mode=opt_mode)
+        warm = _get_warm_start(problem)
         solution = solver.solve(
             problem,
             time_limit_s=time_limit,
+            warm_start=warm,
             extra_solver_params={"random_seed": seed, "num_search_workers": 8},
         )
         stage_reports = None
@@ -105,7 +125,9 @@ def run_generation(run_id: int) -> None:
             # Allocate time per candidate budget
             is_large_solve = len(problem.divisions) >= 6
             if os.environ.get("VERCEL"):
-                per_candidate_time = min(25.0, max(8.0, run.time_limit / num_candidates))
+                # On serverless, cap to 1 candidate and 18s to guarantee sub-20s HTTP response
+                num_candidates = 1
+                per_candidate_time = min(18.0, max(5.0, run.time_limit))
             else:
                 min_floor = 95.0 if is_large_solve else 10.0
                 per_candidate_time = max(min_floor, run.time_limit / num_candidates) if num_candidates > 1 else max(run.time_limit, min_floor)

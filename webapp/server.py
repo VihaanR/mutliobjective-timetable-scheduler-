@@ -85,20 +85,6 @@ async def global_exception_handler(request, exc):
 def health():
     return {"status": "ok", "lifespan_error": getattr(app.state, "lifespan_error", None)}
 
-@app.get("/api/ping")
-def ping():
-    return {"ping": "pong"}
-
-@app.get("/api/debug-env")
-def debug_env():
-    safe_env = {k: v for k, v in os.environ.items() if not any(s in k.lower() for s in ["key", "secret", "pass", "token"])}
-    return {
-        "env": safe_env,
-        "cwd": os.getcwd(),
-        "tmp_files": os.listdir("/tmp") if os.path.exists("/tmp") else [],
-        "static_exists": STATIC_DIR.exists(),
-        "static_files": os.listdir(STATIC_DIR) if STATIC_DIR.exists() else [],
-    }
 
 for _router in (auth_router.router, branches.router, faculty.router, students.router, courses.router,
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,

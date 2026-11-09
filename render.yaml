@@ -12,4 +12,4 @@ services:
       - key: MALLOC_ARENA_MAX
         value: "2"
       - key: CP_SAT_WORKERS
-        value: "2"
+        value: "4"

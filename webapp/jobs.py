@@ -47,6 +47,13 @@ from engine.judge import evaluate_aqwi, compute_pareto_front, AQWIReport
 
 
 def _get_warm_start(problem, session: Session | None = None) -> Solution | None:
+    from engine.models import expand_requirements, Solution
+    req_ids = {r.id for r in getattr(problem, "requirements", []) or []}
+    if not req_ids:
+        req_ids = {r.id for r in expand_requirements(problem)}
+
+    candidates_to_try: list[Solution] = []
+
     if session is not None:
         try:
             recent_done = session.exec(
@@ -56,28 +63,44 @@ def _get_warm_start(problem, session: Session | None = None) -> Solution | None:
                 sol_raw = r.solution or (r.candidate_solutions[0] if (r.candidate_solutions and len(r.candidate_solutions) > 0) else None)
                 if sol_raw:
                     sol_dict = sol_raw if isinstance(sol_raw, dict) else json.loads(sol_raw)
-                    cand = solution_from_dict(sol_dict)
-                    sc = score(cand, problem)
-                    if sc.hard_violations == 0:
-                        return cand
+                    candidates_to_try.append(solution_from_dict(sol_dict))
         except Exception:
             pass
 
-    for path in [
+    for ref_p in [
         Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json",
         Path("data/reference/initial_even_semesters_run.json"),
     ]:
         try:
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+            if ref_p.exists():
+                with open(ref_p, "r", encoding="utf-8") as f:
                     ref_dict = json.load(f)
                 if "solution" in ref_dict:
-                    candidate = solution_from_dict(ref_dict["solution"])
-                    sc = score(candidate, problem)
-                    if sc.hard_violations == 0:
-                        return candidate
+                    candidates_to_try.append(solution_from_dict(ref_dict["solution"]))
+                elif "candidate_solutions" in ref_dict and len(ref_dict["candidate_solutions"]) > 0:
+                    candidates_to_try.append(solution_from_dict(ref_dict["candidate_solutions"][0]))
         except Exception:
             pass
+
+    best_partial = None
+    best_partial_count = 0
+
+    for cand in candidates_to_try:
+        try:
+            sc = score(cand, problem)
+            if sc.hard_violations == 0:
+                return cand
+        except Exception:
+            pass
+
+        matching_assignments = [a for a in cand.assignments if a.session_id in req_ids]
+        if len(matching_assignments) > best_partial_count and len(matching_assignments) >= len(req_ids) * 0.5:
+            best_partial_count = len(matching_assignments)
+            best_partial = Solution(assignments=matching_assignments, status="FEASIBLE")
+
+    if best_partial is not None:
+        return best_partial
+
     return None
 
 

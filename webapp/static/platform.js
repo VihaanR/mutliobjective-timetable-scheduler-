@@ -3938,14 +3938,21 @@ function initUnifiedEvenConsole() {
 
   if (btnGen) {
     btnGen.onclick = async () => {
-      let branch_ids = [5, 19, 18];
-      let label = "All Even Semesters (SY + TY + BTech)";
-      if (selectedEvenScope === "sy_sem4") { branch_ids = [5]; label = "SY Sem IV (D1, D2, D3)"; }
-      else if (selectedEvenScope === "ty_sem6") { branch_ids = [19]; label = "TY Sem VI (D1, D2, D3)"; }
-      else if (selectedEvenScope === "btech_sem8") { branch_ids = [18]; label = "BTech Sem VIII (D1, D2)"; }
+      const syB = (allBranches || []).find(b => (b.code && b.code.includes("SEM4")) || b.semester === 4);
+      const tyB = (allBranches || []).find(b => (b.code && b.code.includes("SEM6")) || b.semester === 6);
+      const btB = (allBranches || []).find(b => (b.code && b.code.includes("SEM8")) || b.semester === 8);
 
-      const timeLimitEl = $("unifiedTimeLimit");
-      const timeLimit = timeLimitEl ? (parseInt(timeLimitEl.value) || 45) : 45;
+      let branch_ids = [syB?.id, tyB?.id, btB?.id].filter(Boolean);
+      let label = "All Even Semesters (SY + TY + BTech)";
+      if (selectedEvenScope === "sy_sem4") { branch_ids = syB ? [syB.id] : []; label = "SY Sem IV (D1, D2, D3)"; }
+      else if (selectedEvenScope === "ty_sem6") { branch_ids = tyB ? [tyB.id] : []; label = "TY Sem VI (D1, D2, D3)"; }
+      else if (selectedEvenScope === "btech_sem8") { branch_ids = btB ? [btB.id] : []; label = "BTech Sem VIII (D1, D2)"; }
+      if (!branch_ids.length) {
+        branch_ids = (allBranches || []).map(b => b.id);
+      }
+
+      const timeLimitEl = $("unifiedTimeLimit") || $("timeLimit");
+      const timeLimit = timeLimitEl ? (parseFloat(timeLimitEl.value) || 60) : 60;
 
       const progressCard = $("unifiedProgressCard");
       const progressText = $("unifiedProgressText");

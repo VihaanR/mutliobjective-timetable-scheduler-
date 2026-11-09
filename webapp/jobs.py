@@ -96,7 +96,7 @@ def _get_warm_start(problem, session: Session | None = None) -> Solution | None:
         matching_assignments = [a for a in cand.assignments if a.session_id in req_ids]
         if len(matching_assignments) > best_partial_count and len(matching_assignments) >= len(req_ids) * 0.5:
             best_partial_count = len(matching_assignments)
-            best_partial = Solution(assignments=matching_assignments, status="FEASIBLE")
+            best_partial = Solution(assignments=matching_assignments, solver_name="warm_start", wall_clock_seconds=0.0, status="FEASIBLE")
 
     if best_partial is not None:
         return best_partial

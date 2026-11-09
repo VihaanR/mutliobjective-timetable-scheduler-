@@ -431,7 +431,7 @@
       "title": "Data Structures",
       "credits": 4,
       "category": "Major",
-      "theory_sessions_per_week": 4,
+      "theory_sessions_per_week": 3,
       "practical_sessions_per_week": 1,
       "is_heavy": true
     },
@@ -449,7 +449,7 @@
       "title": "Statistics for Data Science",
       "credits": 3,
       "category": "Major",
-      "theory_sessions_per_week": 4,
+      "theory_sessions_per_week": 0,
       "practical_sessions_per_week": 1,
       "is_heavy": true
     },
@@ -458,28 +458,28 @@
       "title": "Web Engineering Laboratory",
       "credits": 2,
       "category": "Skill-Based",
-      "practical_sessions_per_week": 2
+      "practical_sessions_per_week": 1
     },
     {
       "code": "PBC",
       "title": "Professional and Business Communication",
       "credits": 1,
       "category": "Ability-Enhancement",
-      "tutorial_sessions_per_week": 1
+      "theory_sessions_per_week": 1
     },
     {
       "code": "EFM",
       "title": "Economics and Financial Management",
       "credits": 3,
       "category": "Minor",
-      "theory_sessions_per_week": 3
+      "theory_sessions_per_week": 2
     },
     {
       "code": "CMPM",
       "title": "Computational Methods and Pricing Models",
       "credits": 3,
       "category": "Value-Added",
-      "theory_sessions_per_week": 4,
+      "theory_sessions_per_week": 3,
       "practical_sessions_per_week": 1
     },
     {
@@ -487,7 +487,7 @@
       "title": "Open Elective",
       "credits": 2,
       "category": "Open-Elective",
-      "theory_sessions_per_week": 2
+      "theory_sessions_per_week": 3
     }
   ],
   "divisions": [

@@ -53,8 +53,9 @@ def _get_warm_start(problem, session: Session | None = None) -> Solution | None:
                 select(TimetableRun).where(TimetableRun.status == "done", TimetableRun.hard == 0).order_by(TimetableRun.id.desc())
             ).all()
             for r in recent_done:
-                if r.solution:
-                    sol_dict = r.solution if isinstance(r.solution, dict) else json.loads(r.solution)
+                sol_raw = r.solution or (r.candidate_solutions[0] if (r.candidate_solutions and len(r.candidate_solutions) > 0) else None)
+                if sol_raw:
+                    sol_dict = sol_raw if isinstance(sol_raw, dict) else json.loads(sol_raw)
                     cand = solution_from_dict(sol_dict)
                     sc = score(cand, problem)
                     if sc.hard_violations == 0:

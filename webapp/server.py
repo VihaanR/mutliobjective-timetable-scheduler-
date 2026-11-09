@@ -59,6 +59,35 @@ async def lifespan(app: FastAPI):
                                 seed._seed_and_report(session, ds, force=True)
                     except Exception as exc:
                         print(f"Auto-repair check warning: {exc}")
+            # Auto-update SY SEM4 course weekly sessions to authentic 30-slot curriculum load
+            try:
+                from webapp.models_db import Course as DbCourse, Branch as DbBranch
+                sy = session.exec(select(DbBranch).where(DbBranch.code == "CSE-DS-SY-SEM4")).first()
+                if sy:
+                    sy_courses = session.exec(select(DbCourse).where(DbCourse.branch_id == sy.id)).all()
+                    course_updates = {
+                        "DS": {"theory_per_week": 3, "practical_per_week": 1},
+                        "ML-I": {"theory_per_week": 3, "practical_per_week": 1},
+                        "SDS": {"theory_per_week": 0, "practical_per_week": 1},
+                        "WE": {"theory_per_week": 0, "practical_per_week": 1},
+                        "CMPM": {"theory_per_week": 3, "practical_per_week": 1},
+                        "OE": {"theory_per_week": 3, "practical_per_week": 0},
+                        "EFM": {"theory_per_week": 2, "practical_per_week": 0},
+                        "PBC": {"theory_per_week": 1, "practical_per_week": 0, "tutorial_per_week": 0},
+                    }
+                    updated_c = False
+                    for c in sy_courses:
+                        if c.code in course_updates:
+                            vals = course_updates[c.code]
+                            for attr, val in vals.items():
+                                if getattr(c, attr) != val:
+                                    setattr(c, attr, val)
+                                    updated_c = True
+                    if updated_c:
+                        session.commit()
+            except Exception as exc:
+                print(f"SY Sem 4 course session auto-update warning: {exc}")
+
             # Auto-repair any allocations where course has theory but faculty_id is None
             try:
                 from webapp.models_db import Allocation, Course

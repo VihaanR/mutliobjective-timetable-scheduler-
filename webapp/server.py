@@ -143,6 +143,65 @@ def health():
     return {"status": "ok", "lifespan_error": getattr(app.state, "lifespan_error", None)}
 
 
+@app.get("/api/debug-warm-start")
+def debug_warm_start():
+    import json
+    from sqlmodel import Session, select
+    from webapp.db import get_engine
+    from webapp.problem_builder import build_problem_dict, spans_multiple_branches
+    from engine.io_json import problem_from_dict, solution_from_dict
+    from engine.scoring import score
+    from engine.models import expand_requirements
+    from webapp.jobs import _get_warm_start
+    import webapp.models_db as m
+
+    with Session(get_engine()) as session:
+        branches = session.exec(select(m.Branch)).all()
+        branch_ids = [b.id for b in branches if any(k in (b.code or '') for k in ['SEM4', 'SEM6', 'SEM8'])]
+        is_multi = spans_multiple_branches(session, branch_ids)
+        prob_dict = build_problem_dict(session, branch_ids=branch_ids, qualify_ids=is_multi)
+        prob = problem_from_dict(prob_dict)
+
+        ws = _get_warm_start(prob, session=session)
+
+    reqs = expand_requirements(prob)
+    ref_paths = [
+        str(Path(__file__).resolve().parent.parent / "data" / "reference" / "initial_even_semesters_run.json"),
+        str(Path("data/reference/initial_even_semesters_run.json")),
+    ]
+    path_status = {p: Path(p).exists() for p in ref_paths}
+
+    eval_results = []
+    for p in ref_paths:
+        if Path(p).exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                cand = solution_from_dict(d.get("solution") or d["candidate_solutions"][0])
+                sc = score(cand, prob)
+                eval_results.append({
+                    "path": p,
+                    "cand_assignments": len(cand.assignments),
+                    "prob_reqs": len(reqs),
+                    "hard": sc.hard_violations,
+                    "soft": sc.soft_cost,
+                    "breakdown": sc.details.get("hard_breakdown", sc.details),
+                })
+            except Exception as e:
+                eval_results.append({"path": p, "error": str(e)})
+
+    return {
+        "branches": [{"id": b.id, "code": b.code} for b in branches],
+        "even_branch_ids": branch_ids,
+        "prob_divisions": [d.id for d in prob.divisions],
+        "prob_reqs_count": len(reqs),
+        "warm_start_found": ws is not None,
+        "warm_start_assignments": len(ws.assignments) if ws else 0,
+        "path_status": path_status,
+        "eval_results": eval_results,
+    }
+
+
 for _router in (auth_router.router, branches.router, faculty.router, students.router, courses.router,
                 rooms.router, allocations.router, slots.router, seed.router, runs.router,
                 calendar.router, constraints.router):
